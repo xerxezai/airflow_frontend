@@ -1,64 +1,165 @@
-import React from 'react'
+import React, { useRef, useState } from 'react'
 import { Formik, Form, Field, ErrorMessage } from 'formik'
 import { Link } from 'react-router-dom'
-import { BRANDING, PAGE_CONTENT, FORM_CONFIG, THEME, LOGIN_RESPONSIVE, ICON } from '../../config/login.config'
+import {
+  BRANDING,
+  PAGE_CONTENT,
+  FORM_CONFIG,
+  THEME,
+  LOGIN_RESPONSIVE,
+  ICON,
+  INTERACTIONS,
+  BUTTON_SHIMMER,
+  FORM_TILT,
+} from '../../config/login.config'
 
 /**
  * LoginForm Component
  * Right side login form - Oil & Gas Industrial Design
  * Advanced Engineering Interface
  */
-const LoginForm = ({ loginSchema, isLoading, onSubmit }) => {
+const LoginForm = ({ loginSchema, isLoading, onSubmit, loginGate, onDismissGate }) => {
   const { company } = BRANDING
   const { title, subtitle } = PAGE_CONTENT
   const { fields, buttons, options } = FORM_CONFIG
   const { colors, gradients } = THEME
 
+  // Soft-coded UX state — purely cosmetic, never affects auth payload
+  const [showPassword, setShowPassword] = useState(false)
+  const [capsLockOn, setCapsLockOn] = useState(false)
+  const handleCapsLock = (e) => {
+    if (!INTERACTIONS.capsLockWarning.enabled) return
+    if (typeof e.getModifierState === 'function') setCapsLockOn(e.getModifierState('CapsLock'))
+  }
+
+  // 3D card tilt — pure CSS transform tracked by mouse position
+  const cardRef = useRef(null)
+  const buttonRef = useRef(null)
+  const [tilt, setTilt] = useState({ rx: 0, ry: 0 })
+  const [buttonMagnet, setButtonMagnet] = useState({ x: 0, y: 0 })
+  const [holographicPosition, setHolographicPosition] = useState(50)
+  
+  const handleTiltMove = (e) => {
+    if (!FORM_TILT.enabled || !cardRef.current) return
+    const rect = cardRef.current.getBoundingClientRect()
+    const px = (e.clientX - rect.left) / rect.width  // 0..1
+    const py = (e.clientY - rect.top) / rect.height
+    setTilt({
+      ry: (px - 0.5) * 2 * FORM_TILT.maxDeg,   // left/right
+      rx: -(py - 0.5) * 2 * FORM_TILT.maxDeg,  // up/down
+    })
+    
+    // Holographic shine effect follows mouse
+    setHolographicPosition(px * 100)
+    
+    // Magnetic button attraction
+    if (buttonRef.current && !isLoading) {
+      const buttonRect = buttonRef.current.getBoundingClientRect()
+      const buttonCenterX = buttonRect.left + buttonRect.width / 2
+      const buttonCenterY = buttonRect.top + buttonRect.height / 2
+      const distanceX = e.clientX - buttonCenterX
+      const distanceY = e.clientY - buttonCenterY
+      const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY)
+      
+      if (distance < 150) {
+        const magnetStrength = (150 - distance) / 150
+        setButtonMagnet({
+          x: (distanceX / distance) * magnetStrength * 8,
+          y: (distanceY / distance) * magnetStrength * 8
+        })
+      } else {
+        setButtonMagnet({ x: 0, y: 0 })
+      }
+    }
+  }
+  
+  const resetTilt = () => {
+    setTilt({ rx: 0, ry: 0 })
+    setButtonMagnet({ x: 0, y: 0 })
+  }
+
   return (
-    <div className={`${LOGIN_RESPONSIVE.form.wrapper} relative overflow-y-auto`} style={{ maxHeight: '100vh' }}>
-      {/* Subtle Technical Background */}
-      <div className="absolute inset-0 opacity-5">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-0 left-0 w-96 h-96 bg-gradient-to-tr from-amber-500 to-orange-500 rounded-full blur-3xl"></div>
-      </div>
+    <div className="relative">
+      {/* Premium Glass Form Card */}
+      <div
+        ref={cardRef}
+        onMouseMove={handleTiltMove}
+        onMouseLeave={resetTilt}
+        className="relative backdrop-blur-xl bg-gradient-to-br from-white/95 to-white/85 rounded-3xl p-8 border border-white/30 shadow-2xl overflow-hidden"
+        style={{
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4), inset 0 0 30px rgba(255, 255, 255, 0.1)',
+          ...(FORM_TILT.enabled ? {
+            perspective: `${FORM_TILT.perspective}px`,
+            transform: `rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg)`,
+            transformStyle: 'preserve-3d',
+            transition: `transform ${FORM_TILT.resetMs}ms ease-out`,
+            willChange: 'transform',
+          } : {})
+        }}
+      >
+        {/* Holographic Shine Effect */}
+        <div 
+          className="absolute inset-0 pointer-events-none opacity-30"
+          style={{
+            background: `linear-gradient(110deg, transparent 30%, rgba(115, 189, 200, 0.3) ${holographicPosition}%, transparent 70%)`,
+            transition: 'background 0.3s ease-out'
+          }}
+        />
+        
+        {/* Noise Texture for Depth */}
+        <div 
+          className="absolute inset-0 opacity-[0.02] mix-blend-overlay pointer-events-none"
+          style={{
+            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
+            backgroundRepeat: 'repeat'
+          }}
+        />
+        {/* Accent Line */}
+        <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-32 h-1 rounded-full" 
+             style={{ background: 'linear-gradient(to right, #73BDC8, #7FCAB5, #73BDC8)' }}></div>
 
-      <div className={`${LOGIN_RESPONSIVE.form.maxWidth} w-full ${LOGIN_RESPONSIVE.form.container} relative z-10`}>
-        {/* Mobile Logo - Enhanced */}
-        <div className="lg:hidden text-center mb-4">
-          <div className="inline-flex items-center space-x-2 mb-2">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-cyan-600 flex items-center justify-center shadow-lg">
-              <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/>
-              </svg>
-            </div>
-            <div className="text-left">
-              <h1 className="text-xl font-black bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">{company.name}</h1>
-              <p className="text-xs font-semibold text-amber-600">{company.product}</p>
+        {/* Welcome Section */}
+        <div className="text-center mb-8">
+          {/* Professional Rejlers Logo Badge */}
+          <div className="inline-flex items-center justify-center mb-4 relative">
+            <div className="relative">
+              {/* Official Rejlers Logo */}
+              <img 
+                src="/assets/Rejlers_Logo.png" 
+                alt="Rejlers" 
+                className="h-16 w-auto"
+                style={{
+                  filter: 'drop-shadow(0 0 15px rgba(8, 145, 178, 0.3))'
+                }}
+              />
+              
+              {/* Pulsing glow effect */}
+              <div 
+                className="absolute inset-0 -z-10 blur-lg opacity-20"
+                style={{
+                  background: 'radial-gradient(circle, #0891b2 0%, #06b6d4 50%, transparent 70%)',
+                  animation: 'glowPulse 3s ease-in-out infinite'
+                }}
+              />
             </div>
           </div>
-        </div>
 
-        {/* Welcome Message - Industrial Style - Compact */}
-        <div className="text-center mb-4">
-          <div className="inline-flex items-center justify-center space-x-2 mb-1.5">
-            <div className="w-6 h-px bg-gradient-to-r from-transparent via-blue-500 to-transparent"></div>
-            <svg className="w-7 h-7 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
-            </svg>
-            <div className="w-6 h-px bg-gradient-to-r from-transparent via-cyan-500 to-transparent"></div>
+          {/* Powered By Label */}
+          <div className="mb-3">
+            <div className="text-xs font-bold text-cyan-600 tracking-widest">POWERED BY REJLERS</div>
           </div>
-          
-          <h2 className="text-xl sm:text-2xl font-black mb-1 bg-gradient-to-r from-slate-800 via-blue-700 to-cyan-700 bg-clip-text text-transparent">
+
+          <h2 className="text-3xl font-black mb-2 bg-gradient-to-r from-slate-800 via-blue-700 to-cyan-600 bg-clip-text text-transparent">
             {title}
           </h2>
-          <p className="text-gray-600 text-xs font-medium">
+          <p className="text-gray-600 text-sm font-medium mb-4">
             {subtitle}
           </p>
-          
-          {/* Technical Indicator */}
-          <div className="flex items-center justify-center space-x-2 mt-1.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
-            <span className="text-xs text-gray-500 font-medium">Secure Industrial Portal</span>
+
+          {/* Secure Portal Indicator */}
+          <div className="inline-flex items-center space-x-2 px-4 py-2 rounded-full bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200">
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+            <span className="text-xs text-green-700 font-bold">🔐 Secure Industrial Portal</span>
           </div>
         </div>
 
@@ -68,9 +169,58 @@ const LoginForm = ({ loginSchema, isLoading, onSubmit }) => {
           onSubmit={onSubmit}
         >
           {({ errors, touched }) => (
-            <Form className="space-y-3">
+            <Form className="space-y-5">
+              {/* Gate Banner */}
+              {loginGate && (
+                <div
+                  className={`rounded-2xl border-2 p-4 shadow-lg ${
+                    loginGate.severity === 'error'
+                      ? 'bg-red-50 border-red-300 text-red-900'
+                      : loginGate.severity === 'warning'
+                        ? 'bg-orange-50 border-orange-300 text-orange-900'
+                        : 'bg-amber-50 border-amber-300 text-amber-900'
+                  }`}
+                  role="alert"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-3xl leading-none" aria-hidden>{loginGate.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-bold mb-1">{loginGate.title}</h4>
+                      <p className="text-xs leading-relaxed">{loginGate.body}</p>
+                      {loginGate.helpEmail && (
+                        <a
+                          href={
+                            'mailto:' +
+                            loginGate.helpEmail +
+                            (loginGate.autoSubject
+                              ? `?subject=${encodeURIComponent(loginGate.autoSubject)}`
+                              : '') +
+                            (loginGate.autoBody
+                              ? `${loginGate.autoSubject ? '&' : '?'}body=${encodeURIComponent(loginGate.autoBody)}`
+                              : '')
+                          }
+                          className="inline-flex items-center gap-1 mt-2 text-xs font-semibold underline hover:no-underline"
+                        >
+                          ✉️ {loginGate.helpEmailLabel || loginGate.helpEmail}
+                        </a>
+                      )}
+                    </div>
+                    {typeof onDismissGate === 'function' && (
+                      <button
+                        type="button"
+                        onClick={onDismissGate}
+                        className="text-xs opacity-60 hover:opacity-100 flex-shrink-0"
+                        aria-label="Dismiss"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Email Field - Enhanced Industrial Design - Compact */}
-              <div className="relative group">
+              <div className={`relative group ${INTERACTIONS.errorShake.enabled && errors.email && touched.email ? 'login-shake' : ''}`}>
                 <label className="block text-sm font-bold text-gray-700 mb-1.5 flex items-center">
                   <span className="w-1 h-3.5 bg-gradient-to-b from-blue-600 to-cyan-600 rounded-full mr-2"></span>
                   {fields.email.label}
@@ -105,10 +255,18 @@ const LoginForm = ({ loginSchema, isLoading, onSubmit }) => {
               </div>
 
               {/* Password Field - Enhanced Industrial Design - Compact */}
-              <div className="relative group">
-                <label className="block text-sm font-bold text-gray-700 mb-1.5 flex items-center">
-                  <span className="w-1 h-3.5 bg-gradient-to-b from-amber-600 to-orange-600 rounded-full mr-2"></span>
-                  {fields.password.label}
+              <div className={`relative group ${INTERACTIONS.errorShake.enabled && errors.password && touched.password ? 'login-shake' : ''}`}>
+                <label className="block text-sm font-bold text-gray-700 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center">
+                    <span className="w-1 h-3.5 bg-gradient-to-b from-amber-600 to-orange-600 rounded-full mr-2"></span>
+                    {fields.password.label}
+                  </span>
+                  {INTERACTIONS.capsLockWarning.enabled && capsLockOn && (
+                    <span className="inline-flex items-center text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full animate-pulse">
+                      <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 01.78.375l6 7.5a1 1 0 01-.78 1.625H13v5a1 1 0 01-1 1H8a1 1 0 01-1-1v-5H4a1 1 0 01-.78-1.625l6-7.5A1 1 0 0110 2z"/></svg>
+                      {INTERACTIONS.capsLockWarning.message}
+                    </span>
+                  )}
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
@@ -120,8 +278,10 @@ const LoginForm = ({ loginSchema, isLoading, onSubmit }) => {
                   </div>
                   <Field
                     name="password"
-                    type={fields.password.type}
-                    className={`w-full pl-16 pr-4 py-3 text-base border-2 rounded-xl 
+                    type={INTERACTIONS.passwordToggle.enabled && showPassword ? 'text' : fields.password.type}
+                    onKeyDown={handleCapsLock}
+                    onKeyUp={handleCapsLock}
+                    className={`w-full pl-16 pr-14 py-3 text-base border-2 rounded-xl 
                       ${errors.password && touched.password 
                         ? 'border-red-400 focus:border-red-500 focus:ring-4 focus:ring-red-100' 
                         : 'border-gray-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-100'
@@ -131,6 +291,21 @@ const LoginForm = ({ loginSchema, isLoading, onSubmit }) => {
                       shadow-sm hover:shadow-md focus:shadow-lg`}
                     placeholder={fields.password.placeholder}
                   />
+                  {INTERACTIONS.passwordToggle.enabled && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      tabIndex={-1}
+                      aria-label={showPassword ? INTERACTIONS.passwordToggle.hideLabel : INTERACTIONS.passwordToggle.showLabel}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-blue-600 transition-colors z-10"
+                    >
+                      {showPassword ? (
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-5 0-9.27-3.11-11-7.5a11.93 11.93 0 013.34-4.66M9.88 9.88a3 3 0 104.24 4.24M3 3l18 18" /></svg>
+                      ) : (
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                      )}
+                    </button>
+                  )}
                 </div>
                 <ErrorMessage
                   name="password"
@@ -158,17 +333,31 @@ const LoginForm = ({ loginSchema, isLoading, onSubmit }) => {
                 </a>
               </div>
 
-              {/* Sign In Button - Industrial Engineering Style - Compact */}
+              {/* Sign In Button - Advanced with Magnetic Effect */}
               <button
+                ref={buttonRef}
                 type="submit"
                 disabled={isLoading}
-                className="relative w-full text-white font-bold py-3 px-6 rounded-xl overflow-hidden transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed group shadow-lg hover:shadow-xl"
+                className="relative w-full text-white font-bold py-4 px-6 rounded-xl overflow-hidden transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed group shadow-lg hover:shadow-2xl"
                 style={{ 
-                  background: 'linear-gradient(135deg, #1e40af 0%, #0891b2 50%, #06b6d4 100%)',
+                  background: 'linear-gradient(135deg, #0891b2 0%, #0e7490 50%, #155e75 100%)',
+                  transform: `translate(${buttonMagnet.x}px, ${buttonMagnet.y}px) scale(${buttonMagnet.x || buttonMagnet.y ? 1.03 : 1})`,
+                  boxShadow: buttonMagnet.x || buttonMagnet.y 
+                    ? '0 20px 60px -10px rgba(8, 145, 178, 0.5), 0 0 0 2px rgba(115, 189, 200, 0.3)'
+                    : '0 10px 30px -5px rgba(8, 145, 178, 0.3)',
                 }}
               >
-                {/* Animated Background Layer */}
-                <div className="absolute inset-0 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                {/* Animated Energy Flow Background */}
+                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-700">
+                  <div className="absolute inset-0 bg-gradient-to-r from-cyan-400 via-blue-500 to-cyan-400 animate-pulse"></div>
+                  <div 
+                    className="absolute inset-0"
+                    style={{
+                      backgroundImage: 'repeating-linear-gradient(90deg, transparent, transparent 2px, rgba(255,255,255,0.1) 2px, rgba(255,255,255,0.1) 4px)',
+                      animation: 'slideRight 2s linear infinite'
+                    }}
+                  />
+                </div>
                 
                 {/* Technical Grid Overlay */}
                 <div className="absolute inset-0 opacity-10" style={{
@@ -176,6 +365,18 @@ const LoginForm = ({ loginSchema, isLoading, onSubmit }) => {
                                    linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px)`,
                   backgroundSize: '20px 20px'
                 }}></div>
+
+                {/* Soft-coded shimmer sweep */}
+                {BUTTON_SHIMMER.enabled && !isLoading && (
+                  <div
+                    className="absolute inset-0 pointer-events-none"
+                    style={{
+                      background: 'linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.45) 50%, transparent 70%)',
+                      backgroundSize: '200% 100%',
+                      animation: `login-shimmer ${BUTTON_SHIMMER.intervalMs}ms ease-in-out infinite`,
+                    }}
+                  />
+                )}
 
                 {/* Button Content */}
                 <div className="relative z-10 flex items-center justify-center space-x-2.5">
@@ -268,6 +469,25 @@ const LoginForm = ({ loginSchema, isLoading, onSubmit }) => {
           </div>
         </div>
       </div>
+      <style>{`
+        @keyframes login-shake {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-6px); }
+          40% { transform: translateX(6px); }
+          60% { transform: translateX(-4px); }
+          80% { transform: translateX(4px); }
+        }
+        .login-shake { animation: login-shake ${INTERACTIONS.errorShake.durationMs}ms ease-in-out; }
+        @keyframes login-shimmer {
+          0%   { background-position: 200% 0; }
+          60%  { background-position: -100% 0; }
+          100% { background-position: -100% 0; }
+        }
+        @keyframes slideRight {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
+      `}</style>
     </div>
   )
 }

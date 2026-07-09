@@ -4,6 +4,7 @@ import { useSelector } from 'react-redux'
 import { useState, useEffect, useCallback } from 'react'
 import { API_BASE_URL, API_ENDPOINTS } from './config/api.config'
 import { FEATURE_FLAGS, ENV } from './config/features.config'
+import passwordExpiryService from './services/passwordExpiry.service'
 import Layout from './components/Layout/Layout'
 import FirstLoginCheck from './components/Auth/FirstLoginCheck'
 import ChangePasswordModal from './components/Auth/ChangePasswordModal'
@@ -17,6 +18,7 @@ import TermsOfService from './pages/TermsOfService'
 import PrivacyPolicy from './pages/PrivacyPolicy'
 import Dashboard from './pages/Dashboard'
 import Profile from './pages/Profile'
+import ProfileAlignedComprehensive from './pages/ProfileAlignedComprehensive'  // ✅ Comprehensive profile with engineering expertise
 import NotificationPanel from './pages/NotificationPanel'
 import UsageDashboard from './pages/UsageDashboard'
 // SOFT-CODED: /pid/upload disabled — replaced by Engineering > Process > P&ID Verification
@@ -33,6 +35,7 @@ import PFDHistory from './pages/PFDHistory'
 import PFDFiveStageAnalysis from './pages/PFDFiveStageAnalysis'
 import S3PFDBrowser from './pages/S3PFDBrowser'
 import S3Management from './pages/S3Management'
+import DataMiningPlatform from './pages/DataMiningPlatform'
 import CRSDocuments from './pages/CRSDocuments'
 import CRSDocumentsHistory from './pages/CRSDocumentsHistory'
 import CRSChainDetail from './pages/CRSChainDetail'
@@ -41,19 +44,34 @@ import CRSMultipleRevisionClassic from './pages/CRSMultipleRevision'
 import CRSMultiRevisionSmart from './pages/CRSMultiRevisionSmart'
 const CRSMultipleRevision = FEATURE_FLAGS.crsMultiRevisionVersion === 'classic' ? CRSMultipleRevisionClassic : CRSMultiRevisionSmart
 import ProjectControl from './pages/ProjectControl'
+import ProjectsPage from './pages/Projects/ProjectsPage'
 import GeneralQHSE from './pages/QHSE/GeneralQHSE'
+import QHSEHub from './pages/QHSE/QHSEHub'
 // SOFT-CODED: QHSEInterconnectedDemo removed (not needed)
 // import QHSEInterconnectedDemo from './pages/QHSE/QHSEInterconnectedDemo'
-import InvoiceUpload from './pages/Finance/InvoiceUpload'
-import InvoiceList from './pages/Finance/InvoiceList'
+// SOFT-CODED: InvoiceUpload route retired — keep file for future revival
+// import InvoiceUpload from './pages/Finance/InvoiceUpload'
+// SOFT-CODED: InvoiceList / InvoiceDetail routes retired — keep files for future revival
+// import InvoiceList from './pages/Finance/InvoiceList'
+import InvoiceTracker from './pages/Finance/InvoiceTracker'
 import SalarySlip from './pages/Finance/SalarySlip'
-import InvoiceDetail from './pages/Finance/InvoiceDetail'
+import HREmployees from './pages/HR/HREmployees'
+import HRDashboard from './pages/HR/HRDashboard'
+import Payroll from './pages/HR/Payroll'
+import EmployeeSelfService from './pages/HR/EmployeeSelfService'
+import OnboardingOffboarding from './pages/HR/OnboardingOffboarding'
+import SiteVisits from './pages/HR/SiteVisits'
+// import InvoiceDetail from './pages/Finance/InvoiceDetail'
 import InvoiceApproval from './pages/Finance/InvoiceApproval'
+import FinanceHub from './pages/Finance/FinanceHub'
 import InternalSalesDashboard from './pages/InternalSalesDashboard'
 import AdminDashboard from './pages/AdminDashboard'
 import UserManagement from './pages/UserManagement'
 import UserDetail from './pages/UserDetail'
 import WrenchIntegration from './pages/WrenchIntegration'
+import AIChampion from './pages/Admin/AIChampion'
+import EnquiryManagement from './pages/Admin/EnquiryManagement'
+import ActivityReports from './pages/Admin/ActivityReports'
 // SOFT-CODED: Subscription feature disabled for in-house deployment
 // import SubscriptionManagement from './pages/SubscriptionManagement'
 // import SubscriptionPlans from './pages/SubscriptionPlans'
@@ -64,6 +82,7 @@ import Enquiry from './pages/Enquiry'
 import ConsultingService from './pages/ConsultingService'
 import PFDConversionService from './pages/PFDConversionService'
 import AssetIntegrityService from './pages/AssetIntegrityService'
+import PIDAnalysisService from './pages/PIDAnalysisService'
 import DataGovernanceService from './pages/DataGovernanceService'
 import SecurityService from './pages/SecurityService'
 import About from './pages/About'
@@ -81,6 +100,8 @@ import VendorManagement from './pages/Procurement/VendorManagement'
 import RequisitionManagement from './pages/Procurement/RequisitionManagement'
 import OrderManagement from './pages/Procurement/OrderManagement'
 import ReceiptManagement from './pages/Procurement/ReceiptManagement'
+import ProjectDashboard from './pages/Procurement/ProjectDashboard'
+import ProjectDetail from './pages/Procurement/ProjectDetail'
 // Process Datasheet Components
 import ProcessDatasheetPage from './pages/ProcessDatasheetPage'
 import ComprehensivePumpForm from './pages/ProcessDatasheet/ComprehensivePumpForm'
@@ -108,26 +129,64 @@ import SmartElectricalDatasheetPage from './pages/Engineering/Electrical/SmartEl
 // Instrument Datasheet Components
 import InstrumentDatasheetPage from './pages/Engineering/Instrument/InstrumentDatasheetPage'
 import InstrumentIndex from './pages/Engineering/Instrument/InstrumentIndex'
+import IOListPage from './pages/Engineering/Instrument/IOListPage'
+import IOListWorkflowPage from './pages/Engineering/Instrument/IOListWorkflow/IOListWorkflowPage'
+import CableBlockDiagramPage from './pages/Engineering/Instrument/CableBlockDiagramPage'
+import CableSchedulePage from './pages/Engineering/Instrument/CableSchedulePage'
 // Mechanical Datasheet Components
 import MechanicalDatasheetPage from './pages/Engineering/Mechanical/MechanicalDatasheetPage'
 // Civil Datasheet Components
 import CivilDatasheetPage from './pages/Engineering/Civil/CivilDatasheetPage'
 // Digitization Components
 import SpecCustomizationPage from './pages/Engineering/Digitization/SpecCustomizationPage'
+import SpecProjectsPage from './pages/Engineering/Digitization/SpecProjectsPage'
 import DigitizationDatasheetPage from './pages/Engineering/Digitization/DigitizationDatasheetPage'
 import NonTeffMetadataPage from './pages/Engineering/Digitization/NonTeffMetadataPage'
+import NonTeffProjectsPage from './pages/Engineering/Digitization/NonTeffProjectsPage'
 // Piping Components
 import CriticalStressLineList from './pages/Engineering/Piping/CriticalStressLineList'
 import PipingDataSheet from './pages/Engineering/Piping/PipingDataSheet'
 import ValveMTO from './pages/Engineering/Piping/ValveMTO'
+import PipingHub from './pages/Engineering/Piping/PipingHub'
 // Report Generator Components
 import ReportGenerator from './pages/Admin/ReportGenerator'
 import PredictiveInsights from './pages/Admin/PredictiveInsights'
 import AdvancedAnalytics from './pages/Admin/AdvancedAnalytics'
+import RoleManagement from './pages/Admin/RoleManagement'
+import AccessRequests from './pages/Admin/AccessRequests'
+import RequestAccess from './pages/RequestAccess'
 // Debug Components
 import FeaturesDebug from './pages/FeaturesDebug'
+// AI Champion telemetry — fires per-route activity events to keep
+// /admin/ai-champion live. Soft-coded URL→application/feature mapping.
+import useAIChampionTracker from './hooks/useAIChampionTracker'
+
+// SOFT-CODED: Toggle Digitization Datasheet route visibility
+const ENABLE_DIGITIZATION_DATASHEET_ROUTE = false
+
+// SOFT-CODED: Public path aliases — map convenience URLs to the page that
+// should actually serve them. Useful when a URL exists in marketing material
+// or muscle memory (e.g. /register, /contact, /contact-us) but no dedicated
+// page lives at that path. Each entry becomes a public `<Route>` that
+// `<Navigate>`s to the target. Edit this map (no JSX changes needed) to add
+// or retarget aliases. Set the value to `null` to disable an alias.
+//
+//   /register   → /enquiry   (self-service signup is disabled; admin-provisioned)
+//   /contact    → /enquiry   (public "Contact Us" form lives at /enquiry)
+//   /contact-us → /enquiry   (alternate spelling used in external links)
+const PUBLIC_PATH_REDIRECTS = {
+  register:     '/enquiry',
+  contact:      '/enquiry',
+  'contact-us': '/enquiry',
+}
+
+// Back-compat alias (kept for any external reference to this constant)
+const REGISTER_REDIRECT_TARGET = PUBLIC_PATH_REDIRECTS.register
 
 function App() {
+  // Mount AI Champion route-tracker (no-op when unauthenticated)
+  useAIChampionTracker()
+
   const { isAuthenticated, user } = useSelector((state) => state.auth)
   const [userModules, setUserModules] = useState([])
   const [modulesLoaded, setModulesLoaded] = useState(false)
@@ -274,6 +333,12 @@ function App() {
   // Handle password change success
   const handlePasswordChangeSuccess = async () => {
     setMustChangePassword(false)
+    // Immediately clear expiry banner — backend has already cleared the flag
+    passwordExpiryService.clearAndNotify()
+    // Re-check from backend so the service has accurate fresh state
+    passwordExpiryService.checkPasswordExpiry().catch(err =>
+      console.warn('[App] Failed to refresh expiry status after password change:', err)
+    )
     // Refresh user data
     try {
       const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access')
@@ -321,6 +386,7 @@ function App() {
           <Route path="services/consulting" element={<ConsultingService />} />
           <Route path="services/pfd-conversion" element={<PFDConversionService />} />
           <Route path="services/asset-integrity" element={<AssetIntegrityService />} />
+          <Route path="services/pid-analysis" element={<PIDAnalysisService />} />
           <Route path="data-governance" element={<DataGovernanceService />} />
           <Route path="security" element={<SecurityService />} />
           <Route path="about" element={<About />} />
@@ -334,6 +400,19 @@ function App() {
             </PublicRoute>
           }
         />
+        {/* SOFT-CODED: Public path aliases (see PUBLIC_PATH_REDIRECTS at top
+            of this file). Smart-redirects URLs like /register, /contact and
+            /contact-us to their real destination so visitors never land on a
+            blank/404 page. Add new aliases in the map — no JSX changes here. */}
+        {Object.entries(PUBLIC_PATH_REDIRECTS).map(([path, target]) =>
+          target ? (
+            <Route
+              key={`alias-${path}`}
+              path={path}
+              element={<Navigate to={target} replace />}
+            />
+          ) : null
+        )}
         {/* SOFT-CODED: Subscription pricing page disabled for in-house deployment */}
         {/* <Route
           path="pricing"
@@ -387,7 +466,7 @@ function App() {
           path="profile"
           element={
             <ProtectedRoute>
-              <Profile />
+              <ProfileAlignedComprehensive />
             </ProtectedRoute>
           }
         />
@@ -494,6 +573,16 @@ function App() {
           }
         />
         
+        {/* Feature Routes - Data Mining Platform */}
+        <Route
+          path="data-mining"
+          element={
+            <ModuleProtectedRoute moduleCode="data_mining">
+              <DataMiningPlatform />
+            </ModuleProtectedRoute>
+          }
+        />
+        
         {/* Feature Routes - CRS Documents */}
         <Route
           path="crs/documents"
@@ -531,26 +620,20 @@ function App() {
 
         {/* Feature Routes - Finance Invoice Automation */}
         <Route
-          path="finance/upload"
+          path="finance"
           element={
             <ModuleProtectedRoute moduleCode="finance">
-              <InvoiceUpload />
+              <FinanceHub />
             </ModuleProtectedRoute>
           }
         />
+        {/* SOFT-CODED: /finance/upload route retired — link removed from UI */}
+        {/* SOFT-CODED: /finance/invoices and /finance/invoices/:id routes retired — link removed from UI */}
         <Route
-          path="finance/invoices"
+          path="finance/invoice-tracker"
           element={
             <ModuleProtectedRoute moduleCode="finance">
-              <InvoiceList />
-            </ModuleProtectedRoute>
-          }
-        />
-        <Route
-          path="finance/invoices/:id"
-          element={
-            <ModuleProtectedRoute moduleCode="finance">
-              <InvoiceDetail />
+              <InvoiceTracker />
             </ModuleProtectedRoute>
           }
         />
@@ -560,6 +643,55 @@ function App() {
             <ModuleProtectedRoute moduleCode="finance">
               <SalarySlip />
             </ModuleProtectedRoute>
+          }
+        />
+        {/* Human Resources Routes */}
+        <Route
+          path="hr"
+          element={
+            <ProtectedRoute>
+              <HRDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="hr/employees"
+          element={
+            <ProtectedRoute>
+              <HREmployees />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="hr/payroll"
+          element={
+            <ProtectedRoute>
+              <Payroll />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="hr/leave"
+          element={
+            <ProtectedRoute>
+              <EmployeeSelfService />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="hr/onboarding"
+          element={
+            <ProtectedRoute>
+              <OnboardingOffboarding />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="hr/site-visits"
+          element={
+            <ProtectedRoute>
+              <SiteVisits />
+            </ProtectedRoute>
           }
         />
         {/* Internal Sales Analytics Dashboard */}
@@ -628,6 +760,22 @@ function App() {
           element={
             <ModuleProtectedRoute moduleCode="procurement">
               <ReceiptManagement />
+            </ModuleProtectedRoute>
+          }
+        />
+        <Route
+          path="procurement/projects"
+          element={
+            <ModuleProtectedRoute moduleCode="procurement">
+              <ProjectDashboard />
+            </ModuleProtectedRoute>
+          }
+        />
+        <Route
+          path="procurement/projects/:id"
+          element={
+            <ModuleProtectedRoute moduleCode="procurement">
+              <ProjectDetail />
             </ModuleProtectedRoute>
           }
         />
@@ -760,6 +908,15 @@ function App() {
           }
         />
           {/* Piping Routes */}
+          {/* Piping Hub - Landing page for /engineering/piping (fixes 404) */}
+          <Route
+            path="engineering/piping"
+            element={
+              <ProtectedRoute>
+                <PipingHub />
+              </ProtectedRoute>
+            }
+          />
           {/* Valve MTO (Material Take-Off) */}
           <Route
             path="engineering/piping/pms"
@@ -906,6 +1063,38 @@ function App() {
             </ModuleProtectedRoute>
           }
         />
+        <Route
+          path="engineering/instrument/datasheet/io-list"
+          element={
+            <ModuleProtectedRoute moduleCode="instrument_datasheet">
+              <IOListWorkflowPage />
+            </ModuleProtectedRoute>
+          }
+        />
+        <Route
+          path="engineering/instrument/datasheet/io-list/generator"
+          element={
+            <ModuleProtectedRoute moduleCode="instrument_datasheet">
+              <IOListPage />
+            </ModuleProtectedRoute>
+          }
+        />
+        <Route
+          path="engineering/instrument/datasheet/cable-block-diagram"
+          element={
+            <ModuleProtectedRoute moduleCode="instrument_datasheet">
+              <CableBlockDiagramPage />
+            </ModuleProtectedRoute>
+          }
+        />
+        <Route
+          path="engineering/instrument/datasheet/cable-schedule"
+          element={
+            <ModuleProtectedRoute moduleCode="instrument_datasheet">
+              <CableSchedulePage />
+            </ModuleProtectedRoute>
+          }
+        />
 
         {/* Mechanical Datasheet Routes */}
         <Route
@@ -937,13 +1126,23 @@ function App() {
           }
         />
         <Route
-          path="engineering/digitization/datasheet"
+          path="engineering/digitization/spec-customization/projects"
           element={
             <ProtectedRoute>
-              <DigitizationDatasheetPage />
+              <SpecProjectsPage />
             </ProtectedRoute>
           }
         />
+        {ENABLE_DIGITIZATION_DATASHEET_ROUTE && (
+          <Route
+            path="engineering/digitization/datasheet"
+            element={
+              <ProtectedRoute>
+                <DigitizationDatasheetPage />
+              </ProtectedRoute>
+            }
+          />
+        )}
         <Route
           path="engineering/digitization/non-teff-metadata"
           element={
@@ -952,18 +1151,34 @@ function App() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="engineering/digitization/non-teff-metadata/projects"
+          element={
+            <ProtectedRoute>
+              <NonTeffProjectsPage />
+            </ProtectedRoute>
+          }
+        />
 
-        {/* Project Control */}
+        {/* Project Management — phased: Cost Dashboard → Estimates → Documents → (Phase 2+) AI/EVM/Risk */}
         <Route
           path="projects"
           element={
             <ModuleProtectedRoute moduleCode="project_control">
-              <ProjectControl />
+              <ProjectsPage />
             </ModuleProtectedRoute>
           }
         />
 
         {/* QHSE Routes */}
+        <Route
+          path="qhse"
+          element={
+            <ModuleProtectedRoute moduleCode="qhse">
+              <QHSEHub />
+            </ModuleProtectedRoute>
+          }
+        />
         <Route
           path="qhse/general/*"
           element={
@@ -1008,6 +1223,26 @@ function App() {
           }
         />
         <Route
+          path="admin/roles"
+          element={
+            <ProtectedRoute>
+              <RoleManagement />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/access-requests"
+          element={<Navigate to="/admin/roles" replace />}
+        />
+        <Route
+          path="request-access"
+          element={
+            <ProtectedRoute>
+              <RequestAccess />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="admin/users/:id"
           element={
             <ProtectedRoute>
@@ -1020,6 +1255,22 @@ function App() {
           element={
             <ProtectedRoute>
               <WrenchIntegration />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/ai-champion"
+          element={
+            <ProtectedRoute>
+              <AIChampion />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/enquiries"
+          element={
+            <ProtectedRoute>
+              <EnquiryManagement />
             </ProtectedRoute>
           }
         />
@@ -1053,6 +1304,14 @@ function App() {
           element={
             <ProtectedRoute>
               <AdvancedAnalytics />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/activity-reports"
+          element={
+            <ProtectedRoute>
+              <ActivityReports />
             </ProtectedRoute>
           }
         />

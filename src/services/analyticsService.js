@@ -188,6 +188,118 @@ const analyticsService = {
     const response = await apiClient.get('/rbac/analytics/health-checks/component_status/');
     return response.data;
   },
+
+  // ===== AI Champion of the Month =====
+  // `config` is an optional axios request config — useful for callers that
+  // want a shorter timeout for fire-and-forget telemetry so the POST can
+  // never queue behind a long-running synchronous request and hang for
+  // the global default (120 s). See `useAIChampionTracker`.
+  trackActivity: async (payload, config = {}) => {
+    const response = await apiClient.post('/rbac/ai-champion/track/activity/', payload, config);
+    return response.data;
+  },
+
+  trackAIUsage: async (payload, config = {}) => {
+    const response = await apiClient.post('/rbac/ai-champion/track/ai-usage/', payload, config);
+    return response.data;
+  },
+
+  getChampionLeaderboard: async (days = 30, limit = 20) => {
+    const response = await apiClient.get('/rbac/ai-champion/leaderboard/', {
+      params: { days, limit }
+    });
+    return response.data;
+  },
+
+  getCurrentChampion: async () => {
+    const response = await apiClient.get('/rbac/ai-champion/champion/current/');
+    return response.data;
+  },
+
+  getChampionHistory: async (limit = 12) => {
+    const response = await apiClient.get('/rbac/ai-champion/champion/history/', {
+      params: { limit }
+    });
+    return response.data;
+  },
+
+  getCostReport: async (days = 30) => {
+    const response = await apiClient.get('/rbac/ai-champion/cost-report/', {
+      params: { days }
+    });
+    return response.data;
+  },
+
+  getMonthlySummary: async (year, month) => {
+    const response = await apiClient.get('/rbac/ai-champion/monthly-summary/', {
+      params: { year, month }
+    });
+    return response.data;
+  },
+
+  getUserChampionScore: async (userId, days = 30) => {
+    const response = await apiClient.get(`/rbac/ai-champion/${userId}/score/`, {
+      params: { days }
+    });
+    return response.data;
+  },
+
+  recomputeChampion: async (year, month) => {
+    const response = await apiClient.post('/rbac/ai-champion/recompute/', null, {
+      params: { year, month }
+    });
+    return response.data;
+  },
+
+  exportLeaderboardCSV: async (days = 30) => {
+    const response = await apiClient.get('/rbac/ai-champion/export/csv/', {
+      params: { days },
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  // ===== Activity Reports — Admin Dashboard =====
+  getActivitySummary: async (window = 'month') => {
+    const response = await apiClient.get('/rbac/activity-reports/summary/', {
+      params: { window }
+    });
+    return response.data;
+  },
+
+  getActivityByUser: async (window = 'month', limit = 50) => {
+    const response = await apiClient.get('/rbac/activity-reports/by-user/', {
+      params: { window, limit }
+    });
+    return response.data;
+  },
+
+  getActivityByFeature: async (window = 'month') => {
+    const response = await apiClient.get('/rbac/activity-reports/by-feature/', {
+      params: { window }
+    });
+    return response.data;
+  },
+
+  getActivityDaily: async (window = 'week') => {
+    const response = await apiClient.get('/rbac/activity-reports/daily/', {
+      params: { window }
+    });
+    return response.data;
+  },
+
+  getActivityTimeWindows: async () => {
+    const response = await apiClient.get('/rbac/activity-reports/time-windows/');
+    return response.data;
+  },
+
+  exportActivityReportCSV: async (window = 'month', format = 'user') => {
+    const response = await apiClient.get('/rbac/activity-reports/export/csv/', {
+      params: { window, format },
+      responseType: 'blob'
+    });
+    return response.data;
+  },
 };
 
 export default analyticsService;

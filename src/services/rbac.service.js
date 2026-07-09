@@ -28,6 +28,13 @@ class RBACService {
     return apiService.get(`${RBAC_BASE_URL}/users/`, { params });
   }
 
+  async getUserById(id) {
+    // Returns the full UserProfileSerializer payload (roles, modules,
+    // engineer_profile, MFA, security fields) — used by feature pages that
+    // need the rich record on demand (e.g. HR detail drawer).
+    return apiService.get(`${RBAC_BASE_URL}/users/${id}/`);
+  }
+
   async getCurrentUser() {
     return apiService.get(`${RBAC_BASE_URL}/users/me/`);
   }
@@ -55,6 +62,12 @@ class RBACService {
     return apiService.post(`${RBAC_BASE_URL}/users/${userId}/revoke_role/`, {
       role_id: roleId
     });
+  }
+
+  // SOFT-CODED: marks role_id as the primary role for userId;
+  // backend demotes all other roles for that user automatically.
+  async setPrimaryRole(userId, roleId) {
+    return apiService.post(`${RBAC_BASE_URL}/users/${userId}/set_primary_role/`, { role_id: roleId });
   }
 
   async deactivateUser(userId, reason) {
@@ -111,7 +124,23 @@ class RBACService {
 
   // ==================== Roles ====================
   async getRoles() {
-    return apiService.get(`${RBAC_BASE_URL}/roles/`);
+    // SOFT-CODED: is_active=true ensures deactivated roles never appear in the
+    // Role Management UI.  The backend queryset also enforces this server-side;
+    // this param is a defensive client-side guard.
+    return apiService.get(`${RBAC_BASE_URL}/roles/?is_active=true`);
+  }
+
+  // SOFT-CODED: calls the sync-default-role action on the RoleViewSet.
+  // Assigns the Default role to every UserProfile that has no active role.
+  async syncDefaultRole() {
+    return apiService.post(`${RBAC_BASE_URL}/roles/sync-default-role/`);
+  }
+
+  // Flush cached module/permission lists for all users.
+  // Call after deactivating roles or deploying RBAC fixes so every user's
+  // next sidebar load reflects the correct role-based module set.
+  async flushModuleCaches() {
+    return apiService.post(`${RBAC_BASE_URL}/roles/flush-module-caches/`);
   }
 
   async createRole(data) {
@@ -140,6 +169,12 @@ class RBACService {
 
   async assignModuleToRole(roleId, moduleId) {
     return apiService.post(`${RBAC_BASE_URL}/roles/${roleId}/assign_module/`, {
+      module_id: moduleId
+    });
+  }
+
+  async revokeModuleFromRole(roleId, moduleId) {
+    return apiService.post(`${RBAC_BASE_URL}/roles/${roleId}/revoke_module/`, {
       module_id: moduleId
     });
   }
@@ -228,6 +263,29 @@ class RBACService {
   // Bulk assign modules to all users
   async bulkAssignModules(data) {
     return apiService.post(`${RBAC_BASE_URL}/users/bulk-assign-modules/`, data);
+  }
+
+  // ── Access Requests ────────────────────────────────────────────────
+  async getAccessRequests(params = {}) {
+    return apiService.get(`${RBAC_BASE_URL}/access-requests/`, { params });
+  }
+
+  async createAccessRequest(data) {
+    return apiService.post(`${RBAC_BASE_URL}/access-requests/`, data);
+  }
+
+  async approveAccessRequest(id, adminNote = '') {
+    return apiService.post(
+      `${RBAC_BASE_URL}/access-requests/${id}/approve/`,
+      { admin_note: adminNote }
+    );
+  }
+
+  async denyAccessRequest(id, adminNote = '') {
+    return apiService.post(
+      `${RBAC_BASE_URL}/access-requests/${id}/deny/`,
+      { admin_note: adminNote }
+    );
   }
 }
 

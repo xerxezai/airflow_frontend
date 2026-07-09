@@ -21,6 +21,9 @@ const PID_NAMING_CONFIG = {
   detailedDescription: 'Advanced P&ID quality analysis with AI-powered error detection, standards compliance checking (ADNOC DEP, API, ISA-5.1), symbol recognition, and automated quality recommendations.'
 }
 
+// SOFT-CODED: Toggle visibility of Digitization > Datasheets in feature catalog surfaces
+const ENABLE_DIGITIZATION_DATASHEET_FEATURE = false
+
 /**
  * Feature Status Types
  */
@@ -195,27 +198,29 @@ export const FEATURES_CATALOG = {
           avgRating: 4.6
         }
       },
-      {
-        id: 'eng-digitization-datasheet',
-        name: 'Datasheets',
-        shortName: 'Datasheets',
-        description: 'Digital transformation datasheets and documentation',
-        path: '/engineering/digitization/datasheet',
-        moduleCode: 'digitization_datasheet',
-        status: FEATURE_STATUS.NEW,
-        badges: [FEATURE_BADGES.NEW],
-        capabilities: [
-          'Digital documentation management',
-          'Automated datasheet generation',
-          'Template library',
-          'Standards compliance'
-        ],
-        usageStats: {
-          monthlyUses: 0,
-          totalUses: 0,
-          avgRating: 0
-        }
-      }
+      ...(ENABLE_DIGITIZATION_DATASHEET_FEATURE
+        ? [{
+          id: 'eng-digitization-datasheet',
+          name: 'Datasheets',
+          shortName: 'Datasheets',
+          description: 'Digital transformation datasheets and documentation',
+          path: '/engineering/digitization/datasheet',
+          moduleCode: 'digitization_datasheet',
+          status: FEATURE_STATUS.NEW,
+          badges: [FEATURE_BADGES.NEW],
+          capabilities: [
+            'Digital documentation management',
+            'Automated datasheet generation',
+            'Template library',
+            'Standards compliance'
+          ],
+          usageStats: {
+            monthlyUses: 0,
+            totalUses: 0,
+            avgRating: 0
+          }
+        }]
+        : [])
     ]
   },
 
@@ -350,84 +355,9 @@ export const FEATURES_CATALOG = {
     description: 'Financial management and invoicing',
     order: 3,
     features: [
-      {
-        id: 'finance-invoice-upload',
-        name: 'Invoice Upload',
-        shortName: 'Upload',
-        description: 'AI-powered invoice processing and data extraction',
-        path: '/finance/upload',
-        moduleCode: 'finance',
-        status: FEATURE_STATUS.ACTIVE,
-        badges: [FEATURE_BADGES.AI_POWERED],
-        capabilities: [
-          'OCR data extraction',
-          'Automated validation',
-          'Multi-format support',
-          'Duplicate detection'
-        ],
-        metrics: {
-          invoicesProcessed: 12456,
-          accuracy: '99.2%',
-          avgProcessingTime: '45 sec'
-        },
-        usageStats: {
-          monthlyUses: 1567,
-          totalUses: 12456,
-          avgRating: 4.8
-        }
-      },
-      {
-        id: 'finance-invoice-management',
-        name: 'Invoice Management',
-        shortName: 'Invoices',
-        description: 'Complete invoice tracking and management',
-        path: '/finance/invoices',
-        moduleCode: 'finance',
-        status: FEATURE_STATUS.ACTIVE,
-        badges: [FEATURE_BADGES.POPULAR],
-        capabilities: [
-          'Invoice tracking',
-          'Payment status',
-          'Reports and analytics',
-          'Approval workflows'
-        ],
-        metrics: {
-          totalInvoices: 12456,
-          pendingApprovals: 45,
-          avgApprovalTime: '2.3 days'
-        },
-        usageStats: {
-          monthlyUses: 2345,
-          totalUses: 18790,
-          avgRating: 4.6
-        }
-      },
-      {
-        id: 'finance-salary-slip',
-        name: 'Salary Slip',
-        shortName: 'Salary',
-        description: 'Generate and manage employee salary slips',
-        path: '/finance/salary-slip',
-        moduleCode: 'finance',
-        status: FEATURE_STATUS.ACTIVE,
-        badges: [FEATURE_BADGES.NEW],
-        capabilities: [
-          'Salary slip generation',
-          'Employee management',
-          'PDF export',
-          'Monthly tracking'
-        ],
-        metrics: {
-          slipsGenerated: 0,
-          employees: 0,
-          avgGenerationTime: 'Instant'
-        },
-        usageStats: {
-          monthlyUses: 0,
-          totalUses: 0,
-          avgRating: 0
-        }
-      }
+      // SOFT-CODED: finance-invoice-upload feature retired — link removed from UI
+      // SOFT-CODED: finance-invoice-management feature retired — link removed from UI
+      // SOFT-CODED: finance-salary-slip feature retired — link removed from UI
     ]
   },
 

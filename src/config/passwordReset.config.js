@@ -5,6 +5,57 @@
  */
 
 /**
+ * ─── Fallback Mode (Enquiry-based reset) ────────────────────────────────
+ * When SMTP is unavailable, password reset requests are routed through the
+ * public /enquiry/submit/ endpoint (persisted in the Enquiry table) so that
+ * an administrator can review and manually reset the user's password from
+ * the 9.6 Enquiry admin page.
+ *
+ * Flip USE_ENQUIRY_FALLBACK back to false once SMTP is configured; the
+ * original email-based flow will be restored without any code changes.
+ */
+export const PASSWORD_RESET_FALLBACK = {
+  USE_ENQUIRY_FALLBACK: true,           // set to false once SMTP is live
+  enquiryEndpoint: '/enquiry/submit/',  // reuses existing public endpoint
+  serviceCode: 'password-reset',        // tags enquiry as password-reset
+  subject: 'Password Reset Request',
+  urgency: 'high',                      // reset requests are usually urgent
+
+  // Admin contact info shown on the request page so the user has a
+  // fallback channel while waiting for the administrator to action their
+  // request. Update centrally when the admin contact changes.
+  adminContact: {
+    name:  'System Administrator',
+    email: 'tanzeem.agra@rejlers.ae',
+    phone: '+971 50 560 6987',
+    slaHours: 24,   // expected response time
+  },
+
+  // Steps shown in the "How it works" timeline. Reorder / extend freely.
+  workflowSteps: [
+    { icon: '✍️',  title: 'You submit',      body: 'Enter your registered email and (optionally) a reason.' },
+    { icon: '🔔',  title: 'Admin alerted',   body: 'System notifies every administrator in real-time.' },
+    { icon: '🛡️',  title: 'Identity check',  body: 'Admin verifies you and resets the password securely.' },
+    { icon: '📞',  title: 'You get contacted', body: 'You receive a temporary password to change on first login.' },
+  ],
+
+  // Trust badges shown at the bottom of the hero column
+  trustBadges: [
+    { icon: '🔒', label: 'End-to-end encrypted' },
+    { icon: '⚡', label: 'Fast admin response' },
+    { icon: '🛡️', label: 'Zero self-serve resets' },
+  ],
+
+  messageTemplate: ({ email, reason }) =>
+    `A user has requested a password reset via /forgot-password.
+
+User email: ${email}
+Reason: ${reason || '(not provided)'}
+
+Please verify the user's identity and reset their password via User Management (/admin/users). After reset, share the temporary password securely and require change on first login.`,
+}
+
+/**
  * API Endpoints Configuration
  */
 export const PASSWORD_RESET_API = {
@@ -160,10 +211,29 @@ export const getPublicRequestConfig = () => {
 
 /**
  * ================================================================
- * ADMIN PASSWORD RESET CONFIGURATION
+ * ADMIN RESET CONFIRM MODAL — soft-coded copy & behaviour
+ * Replaces native window.confirm() — no browser dialog popups.
  * ================================================================
- * Configuration for admin-initiated password resets
- * Allows admins to reset user passwords to default
+ */
+export const RESET_CONFIRM_MODAL_CONFIG = {
+  title:          'Reset User Password',
+  bodyLine1:      'The password for this account will be reset to the default password below.',
+  bodyLine2:      'The user will be required to change it on next login.',
+  defaultPwLabel: 'New Default Password',
+  userLabel:      'User',
+  confirmBtn:     'Reset Password',
+  cancelBtn:      'Cancel',
+  successMsg:     'Password reset successfully.',
+  errorMsg:       'Failed to reset password. Please try again.',
+  // icon keys must match HeroIcons outline names
+  icon:           'KeyIcon',
+  iconBg:         'bg-orange-100',
+  iconColor:      'text-orange-600',
+}
+
+/**
+ * ================================================================
+ * ADMIN PASSWORD RESET CONFIGURATION
  * ================================================================
  */
 
@@ -221,21 +291,7 @@ ${req.requireSpecialChars ? `• At least one special character (${req.specialCh
 };
 
 /**
- * Show confirmation dialog before resetting password
+ * @deprecated Use RESET_CONFIRM_MODAL_CONFIG + a React modal instead.
+ * Kept for backward-compatibility only. Always returns true (no popup).
  */
-export const confirmAdminPasswordReset = (userEmail) => {
-  if (!ADMIN_PASSWORD_RESET_CONFIG.SECURITY.requireAdminConfirmation) {
-    return true;
-  }
-  
-  const message = `${ADMIN_PASSWORD_RESET_CONFIG.UI.confirmationMessage}
-
-User: ${userEmail}
-${ADMIN_PASSWORD_RESET_CONFIG.UI.warningMessage}
-
-Default Password: ${ADMIN_PASSWORD_RESET_CONFIG.DEFAULT_PASSWORD}
-
-Click OK to proceed with password reset.`;
-  
-  return window.confirm(message);
-};
+export const confirmAdminPasswordReset = (_userEmail) => true;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+﻿import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSelector } from 'react-redux'
 import { isUserAdmin } from '../utils/rbac.utils'
 import wrenchService from '../services/wrench.service'
@@ -253,8 +253,48 @@ const ConfigPanel = ({ config, onSaved, onVerify }) => {
   const [showPassword, setShowPassword] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
+  // Auto-detect state for SVC URL probing
+  const [detecting, setDetecting] = useState(false)
+  const [detectResult, setDetectResult] = useState(null)  // { recommended, candidates }
+
   const handleChange = (field) => (e) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }))
+
+  const handleAutoDetect = async () => {
+    if (!form.base_url) {
+      setAlert({ type: 'error', message: 'Enter the Wrench Server URL first, then click Auto-Detect.' })
+      return
+    }
+    setDetecting(true)
+    setDetectResult(null)
+    setAlert(null)
+    try {
+      const res = await wrenchService.discoverSvcUrl({
+        base_url: form.base_url,
+        svc_url: '',  // force probing of all candidates, ignore any saved svc_url
+      })
+      setDetectResult(res.data)
+      if (res.data.recommended) {
+        setForm((prev) => ({ ...prev, svc_url: res.data.recommended }))
+        setAlert({
+          type: 'success',
+          message: `Auto-detected: ${res.data.recommended}. Click Save to persist.`,
+        })
+      } else {
+        setAlert({
+          type: 'error',
+          message: 'No reachable DocumentSearch host found. See the candidate list below to confirm with your Wrench admin.',
+        })
+      }
+    } catch (err) {
+      setAlert({
+        type: 'error',
+        message: err.response?.data?.detail || 'Auto-detect failed. Check server logs.',
+      })
+    } finally {
+      setDetecting(false)
+    }
+  }
 
   const handleSave = async (e) => {
     e.preventDefault()
@@ -347,21 +387,83 @@ const ConfigPanel = ({ config, onSaved, onVerify }) => {
           <p className="text-xs text-gray-400 mt-1">Must use HTTPS. Used for login and document operations.</p>
         </div>
 
-        {/* SVC URL (optional) */}
+        {/* SVC URL (optional) — with Auto-Detect */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            <GlobeAltIcon className="w-4 h-4 inline mr-1 text-gray-400" />
-            Document Search Service URL
-            <span className="ml-1 text-xs text-gray-400 font-normal">(optional)</span>
-          </label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-sm font-medium text-gray-700">
+              <GlobeAltIcon className="w-4 h-4 inline mr-1 text-gray-400" />
+              Document Search Service URL
+              <span className="ml-1 text-xs text-gray-400 font-normal">(optional)</span>
+            </label>
+            <button
+              type="button"
+              onClick={handleAutoDetect}
+              disabled={detecting || !form.base_url}
+              className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-50 text-white transition shadow-sm"
+              title="Probe common Wrench SVC URL patterns derived from the Server URL"
+            >
+              {detecting
+                ? <ArrowPathIcon className="w-3.5 h-3.5 animate-spin" />
+                : <MagnifyingGlassIcon className="w-3.5 h-3.5" />}
+              {detecting ? 'Probing…' : 'Auto-Detect'}
+            </button>
+          </div>
           <input
             type="url"
             value={form.svc_url}
             onChange={handleChange('svc_url')}
-            placeholder="https://svc.wrenchproject.com"
+            placeholder="https://rejlers.wrenchsp.com/WrenchService_Rejlers_Live/SVC"
             className={inputClass}
           />
-          <p className="text-xs text-gray-400 mt-1">Leave blank if DocumentSearch runs on the same host as the WebAPI.</p>
+          <p className="text-xs text-gray-400 mt-1">
+            Leave blank if DocumentSearch runs on the same host as the WebAPI. Use Auto-Detect to probe common patterns.
+            <br />
+            <span className="text-gray-500">
+              Tip: pasting the full AtomSVC metadata URL (e.g. <code className="font-mono">…/SVC/AtomSVC.svc/</code>)
+              is fine — the system trims it automatically.
+            </span>
+          </p>
+
+          {/* Probe results — clickable candidates */}
+          {detectResult && (
+            <div className="mt-2 border border-gray-200 rounded-lg overflow-hidden text-xs">
+              <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 font-medium text-gray-600">
+                Probed {detectResult.candidates.length} candidate{detectResult.candidates.length === 1 ? '' : 's'}
+                {detectResult.recommended && (
+                  <span className="ml-2 text-emerald-600">
+                    · Best match: <span className="font-mono">{detectResult.recommended}</span>
+                  </span>
+                )}
+              </div>
+              <ul className="divide-y divide-gray-100 max-h-44 overflow-y-auto">
+                {detectResult.candidates.map((c, i) => (
+                  <li
+                    key={`${c.url}-${i}`}
+                    className={`flex items-center justify-between gap-2 px-3 py-1.5 ${
+                      c.reachable ? 'bg-emerald-50/40' : 'bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${
+                          c.reachable ? 'bg-emerald-500' : 'bg-gray-300'
+                        }`}
+                      />
+                      <span className="font-mono text-[11px] truncate" title={c.url}>{c.url}</span>
+                      <span className="text-gray-400 text-[10px] shrink-0">{c.note}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setForm((p) => ({ ...p, svc_url: c.url }))}
+                      className="px-2 py-0.5 text-[11px] rounded bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium transition shrink-0"
+                    >
+                      Use
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         {/* Server ID + Login Name (row) */}
@@ -908,6 +1010,355 @@ const _IDOC_KEY = 'IDOC_ID'
 // Soft-coded: candidate field names for a human-readable document number (used as filename hint).
 const _DOC_NO_KEYS = ['DOC_NO', 'DOCUMENT_NO']
 
+// ─── Project / Folder Browser — soft-coded constants ─────────────────────────
+// All field names, separators, and limits are configured here so the browser
+// adapts to different Wrench deployments without code changes.
+const _PROJECT_KEY        = 'ORDER_NO'  // primary project / order identifier
+const _PROJECT_DESC_KEYS  = ['ORDER_DESCRIPTION', 'PROJECT_DESCRIPTION', 'PROJECT_NAME']
+const _GENEALOGY_KEYS     = ['GENEALOGY_STRING', 'FOLDER_PATH', 'PATH', 'FOLDER']
+// Possible transmittal-ID field names across Wrench deployments
+const _TRANS_ID_KEYS      = ['TRANS_ID', 'TRANS_REF_NO', 'TRANSMITTAL_ID', 'ID']
+// Path-separator characters seen across Wrench installations
+const _PATH_SEPARATOR_RE  = /\s*[/\\>|]\s*/
+// Number of documents fetched when entering the Browse view (so all projects/folders
+// have a chance to appear). Capped to the backend's page_size limit (200).
+const _BROWSE_FETCH_SIZE  = 200
+// Sentinel label shown when a document carries no ORDER_NO
+const _UNASSIGNED_PROJECT = '(Unassigned)'
+
+// Pick the first non-empty value of `keys` from a document row.
+const _pickFirst = (doc, keys) => {
+  for (const k of keys) {
+    const v = doc?.[k]
+    if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim()
+  }
+  return ''
+}
+
+// Split a raw genealogy / path string into clean segments.
+// Handles "/", "\", ">", "|" as separators with optional surrounding whitespace.
+function parseGenealogyPath(raw) {
+  if (!raw) return []
+  return String(raw).split(_PATH_SEPARATOR_RE).map((s) => s.trim()).filter(Boolean)
+}
+
+/**
+ * Build a hierarchical tree from a flat list of Wrench documents.
+ * Tree shape:
+ *   { projects: {
+ *       <order_no>: {
+ *         order_no, order_description,
+ *         folders: { <name>: { name, folders:{...}, documents:[...], totalDocs } },
+ *         documents: [...],     // documents directly at the project root
+ *         totalDocs,            // recursive count
+ *       }
+ *   } }
+ * Pure / side-effect free → safe to call inside useMemo.
+ */
+function buildProjectTree(documents) {
+  const root = { projects: {} }
+  if (!Array.isArray(documents)) return root
+  for (const doc of documents) {
+    const projectNo   = _pickFirst(doc, [_PROJECT_KEY]) || _UNASSIGNED_PROJECT
+    const projectDesc = _pickFirst(doc, _PROJECT_DESC_KEYS)
+    let proj = root.projects[projectNo]
+    if (!proj) {
+      proj = {
+        order_no: projectNo,
+        order_description: projectDesc,
+        folders: {},
+        documents: [],
+        totalDocs: 0,
+      }
+      root.projects[projectNo] = proj
+    }
+    proj.totalDocs += 1
+
+    // Parse folder segments from the genealogy field
+    let segments = parseGenealogyPath(_pickFirst(doc, _GENEALOGY_KEYS))
+    // Drop a leading segment when it duplicates the project description (common in Wrench)
+    if (
+      segments.length &&
+      projectDesc &&
+      segments[0].toLowerCase() === projectDesc.toLowerCase()
+    ) {
+      segments = segments.slice(1)
+    }
+    // Drop a leading segment when it duplicates the ORDER_NO
+    if (segments.length && segments[0] === projectNo) {
+      segments = segments.slice(1)
+    }
+
+    if (segments.length === 0) {
+      proj.documents.push(doc)
+      continue
+    }
+    // Walk into nested folders, creating nodes on the fly
+    let cursor = proj
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i]
+      if (!cursor.folders[seg]) {
+        cursor.folders[seg] = { name: seg, folders: {}, documents: [], totalDocs: 0 }
+      }
+      cursor.folders[seg].totalDocs += 1
+      if (i === segments.length - 1) {
+        cursor.folders[seg].documents.push(doc)
+      }
+      cursor = cursor.folders[seg]
+    }
+  }
+  return root
+}
+
+/**
+ * Resolve a node in the tree from a breadcrumb-path array.
+ *   []                          → root (project list)
+ *   ['5900737']                 → that project node
+ *   ['5900737', 'Engineering']  → a folder inside the project
+ */
+function resolveTreeNode(root, pathArr) {
+  if (!root) return null
+  if (!pathArr || pathArr.length === 0) return { kind: 'root', node: root }
+  const proj = root.projects[pathArr[0]]
+  if (!proj) return null
+  let node = proj
+  for (let i = 1; i < pathArr.length; i++) {
+    node = node.folders[pathArr[i]]
+    if (!node) return null
+  }
+  return { kind: pathArr.length === 1 ? 'project' : 'folder', node }
+}
+
+// ─── Project Browser View — purely presentational ─────────────────────────────
+// Receives a built tree + current breadcrumb path. Renders projects → folders →
+// documents progressively. The same `onDownload` / `downloading` props used by
+// the flat table are reused, so download behaviour is unchanged.
+const ProjectBrowserView = ({ tree, path, onPathChange, onDownload, downloading }) => {
+  const resolved = resolveTreeNode(tree, path)
+
+  if (!resolved) {
+    return (
+      <div className="p-10 text-center text-sm text-gray-400">
+        Path not found in current results. <button
+          type="button" className="text-blue-600 hover:underline"
+          onClick={() => onPathChange([])}
+        >Return to project list</button>
+      </div>
+    )
+  }
+
+  const projectsList = Object.values(tree.projects).sort((a, b) =>
+    String(a.order_no).localeCompare(String(b.order_no), undefined, { numeric: true })
+  )
+
+  return (
+    <div className="p-4 space-y-4">
+      {/* Breadcrumb */}
+      <div className="flex flex-wrap items-center gap-1.5 text-sm">
+        <button
+          type="button"
+          onClick={() => onPathChange([])}
+          className={`flex items-center gap-1 px-2 py-1 rounded-md transition ${
+            path.length === 0
+              ? 'bg-blue-100 text-blue-700 font-semibold'
+              : 'text-gray-600 hover:bg-gray-100'
+          }`}
+        >
+          <FolderIcon className="w-4 h-4" /> All Projects
+          <span className="ml-1 text-xs text-gray-400">({projectsList.length})</span>
+        </button>
+        {path.map((seg, i) => (
+          <React.Fragment key={`${seg}-${i}`}>
+            <span className="text-gray-300">›</span>
+            <button
+              type="button"
+              onClick={() => onPathChange(path.slice(0, i + 1))}
+              className={`px-2 py-1 rounded-md transition truncate max-w-[260px] ${
+                i === path.length - 1
+                  ? 'bg-blue-100 text-blue-700 font-semibold'
+                  : 'text-gray-600 hover:bg-gray-100'
+              }`}
+              title={seg}
+            >
+              {seg}
+            </button>
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* ROOT — project grid */}
+      {resolved.kind === 'root' && (
+        projectsList.length === 0 ? (
+          <div className="p-10 text-center text-sm text-gray-400">No projects returned by Wrench for this filter.</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {projectsList.map((proj) => {
+              const folderCount = Object.keys(proj.folders).length
+              return (
+                <button
+                  type="button"
+                  key={proj.order_no}
+                  onClick={() => onPathChange([proj.order_no])}
+                  className="text-left group p-4 bg-gradient-to-br from-white to-blue-50/40 border border-gray-200 rounded-xl hover:border-blue-400 hover:shadow-md transition"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shrink-0">
+                        <FolderIcon className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-mono font-bold text-gray-900 group-hover:text-blue-700 transition truncate">
+                          {proj.order_no}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate" title={proj.order_description}>
+                          {proj.order_description || <span className="italic text-gray-300">No description</span>}
+                        </p>
+                      </div>
+                    </div>
+                    <ChevronDownIcon className="w-4 h-4 text-gray-400 -rotate-90 shrink-0" />
+                  </div>
+                  <div className="mt-3 flex items-center gap-3 text-xs">
+                    <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-medium">
+                      {proj.totalDocs} doc{proj.totalDocs === 1 ? '' : 's'}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
+                      {folderCount} folder{folderCount === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )
+      )}
+
+      {/* PROJECT or FOLDER — sub-folders + leaf documents */}
+      {resolved.kind !== 'root' && (() => {
+        const node     = resolved.node
+        const subFolders = Object.values(node.folders).sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { numeric: true })
+        )
+        const docs = node.documents || []
+        const isProjectRoot = resolved.kind === 'project'
+
+        return (
+          <div className="space-y-4">
+            {/* Project header (only when at project root) */}
+            {isProjectRoot && (
+              <div className="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-lg">
+                <p className="text-xs text-blue-600 font-medium uppercase tracking-wider">Project</p>
+                <p className="font-mono font-bold text-lg text-blue-900">{node.order_no}</p>
+                {node.order_description && (
+                  <p className="text-sm text-blue-700">{node.order_description}</p>
+                )}
+                <p className="text-xs text-blue-600 mt-1">
+                  {node.totalDocs} total document{node.totalDocs === 1 ? '' : 's'} ·
+                  {' '}{subFolders.length} top-level folder{subFolders.length === 1 ? '' : 's'} ·
+                  {' '}{docs.length} at project root
+                </p>
+              </div>
+            )}
+
+            {/* Sub-folder grid */}
+            {subFolders.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                  Folders ({subFolders.length})
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+                  {subFolders.map((folder) => (
+                    <button
+                      type="button"
+                      key={folder.name}
+                      onClick={() => onPathChange([...path, folder.name])}
+                      className="flex items-center gap-2 p-2.5 text-left bg-white border border-gray-200 rounded-lg hover:border-amber-400 hover:bg-amber-50/40 transition group"
+                    >
+                      <div className="w-8 h-8 rounded-md bg-amber-100 group-hover:bg-amber-200 flex items-center justify-center shrink-0 transition">
+                        <FolderIcon className="w-4 h-4 text-amber-700" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-800 truncate" title={folder.name}>
+                          {folder.name}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {folder.totalDocs} doc{folder.totalDocs === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                      <ChevronDownIcon className="w-4 h-4 text-gray-300 group-hover:text-amber-500 -rotate-90 shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Documents at the current folder/project level */}
+            {docs.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                  Documents ({docs.length})
+                </p>
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          {DOC_COLUMNS.filter((c) => c.key !== 'ORDER_NO' && c.key !== 'GENEALOGY_STRING').map((col) => (
+                            <th key={col.key} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">{col.label}</th>
+                          ))}
+                          <th className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Download</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {docs.map((doc, idx) => {
+                          const idocId = doc[_IDOC_KEY]
+                          const isDl = Boolean(idocId && downloading[idocId])
+                          return (
+                            <tr key={`${idocId || idx}`} className="hover:bg-blue-50/40 transition">
+                              {DOC_COLUMNS.filter((c) => c.key !== 'ORDER_NO' && c.key !== 'GENEALOGY_STRING').map((col) => (
+                                <td key={col.key} className="px-3 py-2 text-gray-700 max-w-[220px] truncate" title={doc[col.key] || ''}>
+                                  {doc[col.key] || <span className="text-gray-300">&mdash;</span>}
+                                </td>
+                              ))}
+                              <td className="px-3 py-2">
+                                {idocId ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => onDownload(doc)}
+                                    disabled={isDl}
+                                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-600 border border-blue-300 rounded-md hover:bg-blue-50 disabled:opacity-50 transition whitespace-nowrap"
+                                  >
+                                    {isDl
+                                      ? <ArrowPathIcon className="w-3 h-3 animate-spin" />
+                                      : <ArrowDownTrayIcon className="w-3 h-3" />}
+                                    {isDl ? '…' : 'Download'}
+                                  </button>
+                                ) : (
+                                  <span className="text-gray-300">&mdash;</span>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Empty state */}
+            {subFolders.length === 0 && docs.length === 0 && (
+              <div className="p-10 text-center text-sm text-gray-400">
+                This folder is empty in the current search result set.
+              </div>
+            )}
+          </div>
+        )
+      })()}
+    </div>
+  )
+}
+
 // Derive display columns from the first data row using the priority list
 function deriveColumns(rows, priorityList, maxCols) {
   if (!rows || rows.length === 0) return []
@@ -1303,371 +1754,759 @@ const _FALLBACK_DISCIPLINES = [
   'STRUCTURAL', 'TELECOM', 'GENERAL',
 ]
 
+// ── Smart Search soft-coded constants ────────────────────────────────────────
+// localStorage key for recent successful queries (per-browser, no PII)
+const _RECENT_SEARCH_KEY   = 'wrench.docSearch.recents'
+const _RECENT_SEARCH_LIMIT = 8
+// Number of discipline quick-pick pills shown next to the smart bar
+const _DISCIPLINE_PILL_COUNT = 6
+// Quick range chips — the label is shown; resolver returns { from, to } as ISO
+const _QUICK_RANGES = [
+  { key: 'today',     label: 'Today' },
+  { key: 'week',      label: 'Last 7 Days' },
+  { key: 'month',     label: 'This Month' },
+  { key: 'last30',    label: 'Last 30 Days' },
+  { key: 'quarter',   label: 'This Quarter' },
+  { key: 'year',      label: 'This Year' },
+]
+// Token grammar for the smart bar — order matters (longest prefix first)
+//   disc:<code>          → discipline
+//   discipline:<code>    → discipline
+//   from:YYYY-MM-DD      → date_from (ISO, naturally parseable by <input type=date>)
+//   to:YYYY-MM-DD        → date_to
+//   after:YYYY-MM-DD     → alias of from:
+//   before:YYYY-MM-DD    → alias of to:
+//   last:30d / last:6w / last:3m / last:1y → relative date_from = today - N
+//   #year                → this:year shortcut (e.g. #2024 → year 2024-01-01..2024-12-31)
+const _SMART_TOKEN_PATTERNS = [
+  { kind: 'discipline', re: /^(?:disc|discipline):([\w-]+)$/i },
+  { kind: 'from',       re: /^(?:from|after):(\d{4}-\d{2}-\d{2})$/i },
+  { kind: 'to',         re: /^(?:to|before|until):(\d{4}-\d{2}-\d{2})$/i },
+  { kind: 'last',       re: /^last:(\d+)([dwmy])$/i },
+  { kind: 'year',       re: /^#?(\d{4})$/ },
+]
+
 // Convert a native date-input value ('YYYY-MM-DD') to Wrench format ('YYYY/MM/DD HH:MM')
 const _toWrenchDate = (isoDate, endOfDay = false) => {
   if (!isoDate) return ''
   return isoDate.replace(/-/g, '/') + (endOfDay ? ' 23:59' : ' 00:00')
 }
 
+// ── Pure date helpers (ISO 'YYYY-MM-DD') for quick-range resolver ───────────
+const _pad2 = (n) => String(n).padStart(2, '0')
+const _isoOf = (d) => `${d.getFullYear()}-${_pad2(d.getMonth() + 1)}-${_pad2(d.getDate())}`
+const _isoToday = () => _isoOf(new Date())
+const _isoAddDays = (iso, n) => {
+  const d = new Date(iso); d.setDate(d.getDate() + n); return _isoOf(d)
+}
+const _isoStartOfMonth = () => {
+  const d = new Date(); return _isoOf(new Date(d.getFullYear(), d.getMonth(), 1))
+}
+const _isoStartOfQuarter = () => {
+  const d = new Date(); const q = Math.floor(d.getMonth() / 3) * 3
+  return _isoOf(new Date(d.getFullYear(), q, 1))
+}
+const _isoStartOfYear = () => {
+  const d = new Date(); return _isoOf(new Date(d.getFullYear(), 0, 1))
+}
+
+const _resolveQuickRange = (key) => {
+  const today = _isoToday()
+  switch (key) {
+    case 'today':   return { from: today,                   to: today }
+    case 'week':    return { from: _isoAddDays(today, -6),  to: today }
+    case 'last30':  return { from: _isoAddDays(today, -29), to: today }
+    case 'month':   return { from: _isoStartOfMonth(),      to: today }
+    case 'quarter': return { from: _isoStartOfQuarter(),    to: today }
+    case 'year':    return { from: _isoStartOfYear(),       to: today }
+    default:        return { from: '', to: '' }
+  }
+}
+
+/**
+ * Parse a free-form smart-search string into structured filters.
+ * Pure / no side effects → safe to call on every keystroke.
+ *
+ * Examples:
+ *   "P16093 disc:ELEC last:30d"   → discipline=ELEC, doc_no=P16093, date_from=today-30d
+ *   "from:2024-01-01 to:2024-06-30 pump"
+ *   "#2024 INST"                  → discipline=INST, year 2024
+ *   "VESSEL"                      → discipline=VESSEL (if known) else doc_no=VESSEL
+ *
+ * @param {string} input
+ * @param {string[]} knownDisciplines  (case-insensitive matching list)
+ * @returns {{discipline:string, doc_no:string, date_from:string, date_to:string}} ISO dates
+ */
+const parseSmartQuery = (input, knownDisciplines = []) => {
+  const out = { discipline: '', doc_no: '', date_from: '', date_to: '' }
+  if (!input) return out
+  const upperKnown = knownDisciplines.map((d) => String(d).toUpperCase())
+  const freeWords  = []
+
+  for (const tok of input.trim().split(/\s+/)) {
+    let matched = false
+    for (const pat of _SMART_TOKEN_PATTERNS) {
+      const m = tok.match(pat.re)
+      if (!m) continue
+      matched = true
+      if (pat.kind === 'discipline') out.discipline = m[1].toUpperCase()
+      else if (pat.kind === 'from')  out.date_from  = m[1]
+      else if (pat.kind === 'to')    out.date_to    = m[1]
+      else if (pat.kind === 'last') {
+        const n = parseInt(m[1], 10)
+        const unit = m[2].toLowerCase()
+        const mult = unit === 'd' ? 1 : unit === 'w' ? 7 : unit === 'm' ? 30 : 365
+        out.date_from = _isoAddDays(_isoToday(), -n * mult)
+        out.date_to   = _isoToday()
+      }
+      else if (pat.kind === 'year') {
+        const y = m[1]
+        out.date_from = `${y}-01-01`
+        out.date_to   = `${y}-12-31`
+      }
+      break
+    }
+    if (matched) continue
+    // Bare token → discipline if it matches a known one, otherwise part of doc_no
+    if (upperKnown.includes(tok.toUpperCase()) && !out.discipline) {
+      out.discipline = tok.toUpperCase()
+    } else {
+      freeWords.push(tok)
+    }
+  }
+  out.doc_no = freeWords.join(' ').trim()
+  return out
+}
+
+// ─── Module-level cache for the slow `listTransmittals` call ─────────────────
+// Wrench's GetTransmittalList returns the full set every time and may take several
+// minutes. We share the in-flight Promise across mounts/StrictMode double-effects
+// AND cache the resolved result for `_PROJECT_LIST_CACHE_TTL_MS` so re-opening the
+// Document Search tab is instant. Soft-coded TTL (override at build time if needed).
+const _PROJECT_LIST_CACHE_TTL_MS = 5 * 60 * 1000  // 5 minutes
+let   _projectListCache    = null   // { data: [...], fetchedAt: <ms epoch> }
+let   _projectListInFlight = null   // Promise<list>
+
+const _fetchProjectListShared = (pageSize, maxPages) => {
+  // Serve from cache when still fresh
+  if (_projectListCache && (Date.now() - _projectListCache.fetchedAt) < _PROJECT_LIST_CACHE_TTL_MS) {
+    return Promise.resolve(_projectListCache.data)
+  }
+  // De-duplicate concurrent callers
+  if (_projectListInFlight) return _projectListInFlight
+
+  _projectListInFlight = (async () => {
+    const first = await wrenchService.listTransmittals(1, pageSize)
+    const list  = first.data?.transmittals || []
+    const total = Number(first.data?.total ?? list.length)
+    let all = list
+    if (total > list.length) {
+      const pages = Math.min(maxPages, Math.ceil(total / pageSize))
+      for (let p = 2; p <= pages; p++) {
+        try {
+          const r = await wrenchService.listTransmittals(p, pageSize)
+          const part = r.data?.transmittals || []
+          if (part.length === 0) break
+          all = all.concat(part)
+        } catch { break }
+      }
+    }
+    _projectListCache = { data: all, fetchedAt: Date.now() }
+    return all
+  })().finally(() => { _projectListInFlight = null })
+
+  return _projectListInFlight
+}
+
+const _invalidateProjectListCache = () => { _projectListCache = null }
+
 const DocumentSearchSection = ({ config, onGoToConfig }) => {
-  const hasSvcUrl = Boolean(config?.svc_url)
+  // ─── Soft-coded constants (no magic numbers) ──────────────────────────────
+  const _PROJECT_FETCH_PAGE_SIZE = 500     // Wrench listTransmittals page size
+  const _PROJECT_FETCH_MAX_PAGES = 20      // safety cap when paginating
+  const _PROJECT_DOC_FETCH_SIZE  = 100     // documents per project drill-down (smaller = faster perceived response)
+  const _PROJECT_DOC_EMPTY_MSG   = 'No documents are linked to project'
+  const _SORT_LOCALE_OPTS        = { numeric: true, sensitivity: 'base' }
 
-  // Choices loaded once on mount from the backend sample endpoint
-  const [choices, setChoices] = useState({ disciplines: [], doc_numbers: [], svc_url_required: false })
-  const [choicesLoading, setChoicesLoading] = useState(false)
+  // NOTE: We intentionally do NOT gate this view on config.svc_url.
+  // The project-first flow uses REST endpoints (list-transmittals,
+  // Document/Get, Document/Download) that only need a session token.
+  // The legacy SVC URL is only used by the OData search fallback.
+  void config; void onGoToConfig;
 
-  // Filter state — discipline/doc_no hold the display value; dates are ISO 'YYYY-MM-DD'
-  const [discipline, setDiscipline]   = useState('')
-  const [docNoInput, setDocNoInput]   = useState('')
-  const [dateFrom, setDateFrom]       = useState('')
-  const [dateTo, setDateTo]           = useState('')
-  const [pageSize, setPageSize]       = useState(50)
 
-  const [page, setPage]         = useState(1)
-  const [results, setResults]   = useState(null)
-  const [searching, setSearching] = useState(false)
-  const [alert, setAlert]       = useState(null)
+  // ─── State ────────────────────────────────────────────────────────────────
+  const [projectsRaw,       setProjectsRaw]       = useState([])    // raw transmittals
+  const [loadingProjects,   setLoadingProjects]   = useState(false)
+  const [alert,             setAlert]             = useState(null)
+  const [filterText,        setFilterText]        = useState('')
+  // browsePath: [] = project grid, [orderNo] = project root, [orderNo, f1, f2…] = folder
+  const [browsePath,        setBrowsePath]        = useState([])
+  // Per-project doc cache: { [orderNo]: { loading, docs, error } }
+  const [projectDocsCache,  setProjectDocsCache]  = useState({})
+  const [downloading,       setDownloading]       = useState({})
+  // Per-project diagnostic verification: { [orderNo]: { loading, report, error } }
+  const [verifyState,       setVerifyState]       = useState({})
 
-  // Download state: tracks which IDOC_IDs are currently downloading
-  const [downloading, setDownloading] = useState({})
+  // ─── Aggregate transmittals → unique projects ─────────────────────────────
+  const projects = useMemo(() => {
+    const map = new Map()
+    for (const t of projectsRaw) {
+      const orderNo = String(t.ORDER_NO || '').trim()
+      if (!orderNo) continue
+      const existing = map.get(orderNo)
+      const desc = _pickFirst(t, _PROJECT_DESC_KEYS) || ''
+      if (!existing) {
+        map.set(orderNo, {
+          order_no:           orderNo,
+          order_description:  desc,
+          transmittal_count:  1,
+          sample:             t,
+        })
+      } else {
+        existing.transmittal_count += 1
+        if (!existing.order_description && desc) existing.order_description = desc
+      }
+    }
+    return Array.from(map.values())
+      .sort((a, b) => String(a.order_no).localeCompare(String(b.order_no), undefined, _SORT_LOCALE_OPTS))
+  }, [projectsRaw])
 
-  // Derived: doc numbers shown in datalist — filtered by what user has typed
-  const filteredDocNumbers = docNoInput.length >= 1
-    ? choices.doc_numbers.filter((d) => d.toLowerCase().includes(docNoInput.toLowerCase())).slice(0, 100)
-    : choices.doc_numbers.slice(0, 100)
+  const filteredProjects = useMemo(() => {
+    const q = filterText.trim().toLowerCase()
+    if (!q) return projects
+    return projects.filter((p) =>
+      p.order_no.toLowerCase().includes(q) ||
+      (p.order_description || '').toLowerCase().includes(q)
+    )
+  }, [projects, filterText])
 
-  // Effective disciplines: real Wrench data when available, fallback list otherwise
-  const effectiveDisciplines = choices.disciplines.length > 0
-    ? choices.disciplines
-    : _FALLBACK_DISCIPLINES
+  // ─── Load all projects (transmittals) ─────────────────────────────────────
+  // Uses the module-level shared fetcher so StrictMode double-effects, tab
+  // re-mounts, and concurrent components all share ONE in-flight request and a
+  // short-lived result cache (see _fetchProjectListShared above).
+  const loadProjects = useCallback(async (opts = {}) => {
+    setLoadingProjects(true)
+    setAlert(null)
+    if (opts.force) _invalidateProjectListCache()
+    try {
+      const all = await _fetchProjectListShared(_PROJECT_FETCH_PAGE_SIZE, _PROJECT_FETCH_MAX_PAGES)
+      setProjectsRaw(all)
+      if (all.length === 0) {
+        setAlert({ type: 'info', message: 'Wrench returned 0 transmittals. Verify the connection in Configuration.' })
+      }
+    } catch (err) {
+      const isTimeout = err?.code === 'ECONNABORTED' || /timeout/i.test(err?.message || '')
+      const message = isTimeout
+        ? 'Wrench is taking longer than expected to return the project list. The request is still in flight on the server — wait a moment and click Reload, or verify the Wrench connection in Configuration.'
+        : (err?.response?.data?.detail || err?.message || 'Failed to load projects from Wrench.')
+      setAlert({ type: isTimeout ? 'warning' : 'error', message })
+    } finally {
+      setLoadingProjects(false)
+    }
+  }, [])
 
-  // needsSvcUrl is only true when the backend explicitly reports both REST and DocumentSearch failed
-  const needsSvcUrl = Boolean(choices.svc_url_required)
+  // Auto-load on mount
+  useEffect(() => { loadProjects() }, [loadProjects])
 
-  // ── Download handler ─────────────────────────────────────────────────────
+  // ─── Fetch documents for a project on demand ──────────────────────────────
+  const ensureProjectDocs = useCallback(async (orderNo) => {
+    if (!orderNo) return
+    const existing = projectDocsCache[orderNo]
+    if (existing?.docs || existing?.loading) return
+
+    setProjectDocsCache((prev) => ({
+      ...prev,
+      [orderNo]: { loading: true, docs: null, error: null },
+    }))
+    try {
+      // Use any transmittal under this ORDER_NO for the TRANS_ID hint
+      const sample  = projectsRaw.find((t) => String(t.ORDER_NO || '').trim() === orderNo)
+      const transId = (sample && _pickFirst(sample, _TRANS_ID_KEYS)) || ''
+      const res = await wrenchService.getTransmittalDocuments(orderNo, transId, 1, _PROJECT_DOC_FETCH_SIZE)
+      const docs = res.data?.documents || []
+      const note = res.data?.note || null
+      setProjectDocsCache((prev) => ({
+        ...prev,
+        [orderNo]: { loading: false, docs, error: null, note },
+      }))
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || 'Failed to load documents for this project.'
+      setProjectDocsCache((prev) => ({
+        ...prev,
+        [orderNo]: { loading: false, docs: null, error: msg },
+      }))
+    }
+  }, [projectsRaw, projectDocsCache])
+
+  // Trigger doc fetch whenever we enter a project
+  useEffect(() => {
+    if (browsePath.length >= 1) ensureProjectDocs(browsePath[0])
+  }, [browsePath, ensureProjectDocs])
+
+  // ─── Diagnostic verification (soft-coded) ─────────────────────────────────
+  // Runs the backend `trans-documents/verify` endpoint to explain why a
+  // project's document list is empty (no docs vs. config / endpoint issue).
+  const runVerification = useCallback(async (orderNo) => {
+    if (!orderNo) return
+    setVerifyState((prev) => ({
+      ...prev,
+      [orderNo]: { loading: true, report: null, error: null },
+    }))
+    try {
+      const res = await wrenchService.verifyTransmittalDocuments(orderNo)
+      setVerifyState((prev) => ({
+        ...prev,
+        [orderNo]: { loading: false, report: res.data, error: null },
+      }))
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || 'Verification failed.'
+      setVerifyState((prev) => ({
+        ...prev,
+        [orderNo]: { loading: false, report: null, error: msg },
+      }))
+    }
+  }, [])
+
+  // ─── Resolve folder tree for current project ──────────────────────────────
+  const currentProjectTree = useMemo(() => {
+    if (browsePath.length === 0) return null
+    const orderNo = browsePath[0]
+    const cache   = projectDocsCache[orderNo]
+    if (!cache?.docs) return null
+    const root = buildProjectTree(cache.docs)
+    return root.projects[orderNo] || root.projects[_UNASSIGNED_PROJECT] || null
+  }, [browsePath, projectDocsCache])
+
+  const currentNode = useMemo(() => {
+    if (!currentProjectTree) return null
+    if (browsePath.length === 1) return { kind: 'project', node: currentProjectTree }
+    let node = currentProjectTree
+    for (let i = 1; i < browsePath.length; i++) {
+      node = node?.folders?.[browsePath[i]]
+      if (!node) return null
+    }
+    return { kind: 'folder', node }
+  }, [currentProjectTree, browsePath])
+
+  // ─── Download a single document ───────────────────────────────────────────
   const handleDownload = useCallback(async (doc) => {
     const idocId = doc[_IDOC_KEY]
     if (!idocId) return
-    const docNo = _DOC_NO_KEYS.map((k) => doc[k]).find(Boolean) || idocId
-    setDownloading((prev) => ({ ...prev, [idocId]: true }))
+    const docNo = _DOC_NO_KEYS.map((k) => doc[k]).find(Boolean) || String(idocId)
+    setDownloading((p) => ({ ...p, [idocId]: true }))
     try {
       const res = await wrenchService.downloadDocument(String(idocId), String(docNo))
-      // When backend returns a redirect URL (JSON blob), open it directly
       if (res.data instanceof Blob && res.data.type === 'application/json') {
-        const text = await res.data.text()
-        const json = JSON.parse(text)
-        if (json.download_url) { window.open(json.download_url, '_blank'); return }
+        const txt = await res.data.text()
+        try {
+          const json = JSON.parse(txt)
+          if (json.download_url) { window.open(json.download_url, '_blank'); return }
+        } catch { /* fall through and treat as raw blob */ }
       }
-      // Binary blob — trigger browser save-as
       const url = URL.createObjectURL(res.data)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${docNo}.bin`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
+      const a   = document.createElement('a')
+      a.href = url; a.download = `${docNo}.bin`
+      document.body.appendChild(a); a.click(); a.remove()
       URL.revokeObjectURL(url)
     } catch (err) {
-      const msg = err.response?.data?.detail || 'Download failed. Check server logs.'
-      setAlert({ type: 'error', message: `Download failed for ${docNo}: ${msg}` })
-    } finally {
-      setDownloading((prev) => ({ ...prev, [idocId]: false }))
-    }
-  }, [])
-
-  // ── Load choices on mount ────────────────────────────────────────────────
-  useEffect(() => {
-    setChoicesLoading(true)
-    wrenchService.getDocumentChoices()
-      .then((res) => setChoices(res.data || { disciplines: [], doc_numbers: [], svc_url_required: false }))
-      .catch(() => {/* silent — form still works with fallback list */})
-      .finally(() => setChoicesLoading(false))
-  }, [])
-
-  // ── Search handler ───────────────────────────────────────────────────────
-  const handleSearch = async (targetPage = 1) => {
-    setSearching(true)
-    setAlert(null)
-    try {
-      const res = await wrenchService.searchDocuments({
-        discipline: discipline || undefined,
-        doc_no:     docNoInput || undefined,
-        date_from:  _toWrenchDate(dateFrom, false) || undefined,
-        date_to:    _toWrenchDate(dateTo,   true)  || undefined,
-        page:       targetPage,
-        page_size:  pageSize,
-      })
-      setResults(res.data)
-      setPage(targetPage)
-    } catch (err) {
       setAlert({
-        type: 'error',
-        message: err.response?.data?.detail || 'Document search failed. Check server logs.',
+        type:    'error',
+        message: `Download failed: ${err?.response?.data?.detail || err?.message || 'unknown error'}`,
       })
     } finally {
-      setSearching(false)
+      setDownloading((p) => ({ ...p, [idocId]: false }))
     }
-  }
+  }, [])
 
-  const handleClear = () => {
-    setDiscipline('')
-    setDocNoInput('')
-    setDateFrom('')
-    setDateTo('')
-    setResults(null)
-    setAlert(null)
-    setPage(1)
-  }
-
-  const totalPages = results ? Math.ceil(results.total / pageSize) : 0
-
-  const inputClass =
-    'w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-white'
-  const selectClass =
-    'w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-white appearance-none'
-
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="space-y-5">
-      {/* Both REST and DocumentSearch failed — show a soft info note */}
-      {needsSvcUrl && (
-        <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <InformationCircleIcon className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
-          <div className="text-sm flex-1">
-            <p className="font-semibold text-blue-800">Could not reach the Wrench document API</p>
-            <p className="mt-1 text-blue-700">
-              Using the standard O&G discipline list. You can still type any Document Number manually.
-              If your Wrench instance uses a dedicated DocumentSearch server, add its URL in Configuration.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Filter card */}
-      <div className="bg-white rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/80 overflow-hidden">
-        <div className="px-6 py-5 bg-gradient-to-r from-indigo-700 via-blue-600 to-cyan-600">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center ring-1 ring-white/20">
-                <MagnifyingGlassIcon className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-white">Document Search</h3>
-                <p className="text-xs text-blue-100/80">
-                  {choicesLoading
-                    ? 'Connecting to Wrench…'
-                    : choices.disciplines.length > 0
-                      ? `${choices.disciplines.length} disciplines · ${choices.doc_numbers.length} docs loaded from Wrench`
-                      : 'Query the Wrench document repository'}
-                </p>
-              </div>
+      {/* Header */}
+      <div className="bg-gradient-to-r from-indigo-700 via-blue-600 to-cyan-600 rounded-2xl shadow-md overflow-hidden">
+        <div className="px-6 py-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center ring-1 ring-white/20">
+              <FolderIcon className="w-6 h-6 text-white" />
             </div>
-            {choicesLoading && (
-              <ArrowPathIcon className="w-4 h-4 text-white/70 animate-spin" />
-            )}
-          </div>
-        </div>
-
-        <div className="p-6 space-y-4">
-          {alert && <Alert type={alert.type} message={alert.message} />}
-
-          <div className="grid grid-cols-2 gap-4">
-
-            {/* ── Discipline dropdown ──────────────────────────────────── */}
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Discipline
-                <span className="ml-1 text-gray-400 font-normal">
-                  {choices.disciplines.length > 0
-                    ? `(${choices.disciplines.length} from Wrench)`
-                    : `(${_FALLBACK_DISCIPLINES.length} standard)`}
-                </span>
-              </label>
-              <div className="relative">
-                <select
-                  value={discipline}
-                  onChange={(e) => setDiscipline(e.target.value)}
-                  className={selectClass}
-                >
-                  <option value="">— All Disciplines —</option>
-                  {effectiveDisciplines.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                  {/* Allow free-typed value even if not in list */}
-                  {discipline && !effectiveDisciplines.includes(discipline) && (
-                    <option value={discipline}>{discipline} (custom)</option>
-                  )}
-                </select>
-                <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              </div>
+              <h3 className="text-lg font-semibold text-white">Document Search — Projects</h3>
+              <p className="text-xs text-blue-100/80 mt-0.5">
+                {loadingProjects
+                  ? 'Loading projects from Wrench…'
+                  : `${projects.length} project${projects.length === 1 ? '' : 's'} • click any project to browse its folders`}
+              </p>
             </div>
-
-            {/* ── Document No. combobox (datalist) ────────────────────── */}
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Document No.
-                {choices.doc_numbers.length > 0 && (
-                  <span className="ml-1 text-gray-400 font-normal">({choices.doc_numbers.length} available)</span>
-                )}
-              </label>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/60" />
               <input
-                list="wrench-doc-numbers"
                 type="text"
-                value={docNoInput}
-                onChange={(e) => setDocNoInput(e.target.value)}
-                placeholder={
-                  choices.doc_numbers.length > 0
-                    ? 'Type or select a Doc No.'
-                    : needsSvcUrl
-                      ? 'Type a Doc No. (live list available after SVC URL is set)'
-                      : 'e.g. P16093-30-76-08'
-                }
-                className={inputClass}
+                value={filterText}
+                onChange={(e) => setFilterText(e.target.value)}
+                placeholder="Filter projects by number or name…"
+                className="pl-9 pr-3 py-2 w-full md:w-80 text-sm bg-white/10 backdrop-blur border border-white/20 rounded-lg text-white placeholder:text-white/60 focus:bg-white/20 focus:ring-2 focus:ring-white/30 outline-none transition"
               />
-              <datalist id="wrench-doc-numbers">
-                {filteredDocNumbers.map((d) => (
-                  <option key={d} value={d} />
-                ))}
-              </datalist>
-            </div>
-
-            {/* ── Approved From (date picker) ──────────────────────────── */}
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Approved From</label>
-              <input
-                type="date"
-                value={dateFrom}
-                max={dateTo || undefined}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className={inputClass}
-              />
-              {dateFrom && (
-                <p className="mt-0.5 text-xs text-gray-400 font-mono">→ {_toWrenchDate(dateFrom, false)}</p>
-              )}
-            </div>
-
-            {/* ── Approved To (date picker) ─────────────────────────────── */}
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Approved To</label>
-              <input
-                type="date"
-                value={dateTo}
-                min={dateFrom || undefined}
-                onChange={(e) => setDateTo(e.target.value)}
-                className={inputClass}
-              />
-              {dateTo && (
-                <p className="mt-0.5 text-xs text-gray-400 font-mono">→ {_toWrenchDate(dateTo, true)}</p>
-              )}
-            </div>
-          </div>
-
-          {/* Controls row */}
-          <div className="flex items-center justify-between pt-1">
-            <div className="flex items-center gap-3">
-              <label className="text-xs font-medium text-gray-600">Rows per page:</label>
-              <select
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-                className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-blue-500 outline-none"
-              >
-                {DOC_PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-              {(discipline || docNoInput || dateFrom || dateTo) && (
-                <button
-                  type="button"
-                  onClick={handleClear}
-                  className="text-xs text-gray-500 hover:text-gray-700 underline transition"
-                >
-                  Clear filters
-                </button>
-              )}
             </div>
             <button
               type="button"
-              onClick={() => handleSearch(1)}
-              disabled={searching}
-              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-md shadow-blue-400/25 transition-all duration-200"
+              onClick={() => loadProjects({ force: true })}
+              disabled={loadingProjects}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-white/10 backdrop-blur border border-white/20 rounded-lg text-white hover:bg-white/20 disabled:opacity-50 transition"
             >
-              {searching
-                ? <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                : <MagnifyingGlassIcon className="w-4 h-4" />}
-              {searching ? 'Searching…' : 'Search Documents'}
+              <ArrowPathIcon className={`w-4 h-4 ${loadingProjects ? 'animate-spin' : ''}`} />
+              {loadingProjects ? 'Loading' : 'Reload'}
             </button>
           </div>
         </div>
       </div>
 
-      {/* Results table */}
-      {results && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="px-6 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50">
-            <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
-              <TableCellsIcon className="w-4 h-4 text-gray-400" />
-              {results.total.toLocaleString()} document{results.total !== 1 ? 's' : ''} found
-            </span>
-            {totalPages > 1 && <span className="text-xs text-gray-400">Page {page} of {totalPages}</span>}
-          </div>
+      {/*
+        Note: project browsing & document downloads in this view both use Wrench REST
+        endpoints (list-transmittals + Document/Get + Document/Download) that require
+        only the session token. The legacy SVC URL is only used by the OData/AtomSVC
+        search fallback — irrelevant here — so we intentionally do NOT surface any
+        "SVC URL is not configured" warning. If a specific download fails because the
+        document is only reachable via OData, the per-row download handler will
+        surface the actual error via the alert area below.
+      */}
 
-          {results.documents.length === 0 ? (
-            <div className="p-10 text-center text-sm text-gray-400">No documents match the selected filters.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-xs">
-                <thead className="bg-gradient-to-r from-slate-100 to-slate-50 border-b border-gray-200">
-                  <tr>
-                    {DOC_COLUMNS.map((col) => (
-                      <th key={col.key} className="px-4 py-2.5 text-left font-semibold text-gray-600 whitespace-nowrap">{col.label}</th>
-                    ))}
-                    <th className="px-4 py-2.5 text-left font-semibold text-gray-600 whitespace-nowrap">Download</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {results.documents.map((doc, idx) => {
-                    const idocId = doc[_IDOC_KEY]
-                    const isDownloading = Boolean(idocId && downloading[idocId])
-                    return (
-                      <tr key={idx} className="hover:bg-blue-50/40 transition-colors duration-150">
-                        {DOC_COLUMNS.map((col) => (
-                          <td key={col.key} className="px-4 py-2.5 text-gray-700 max-w-[200px] truncate" title={doc[col.key] || ''}>
-                            {doc[col.key] || <span className="text-gray-300">&mdash;</span>}
-                          </td>
-                        ))}
-                        <td className="px-4 py-2.5">
-                          {idocId ? (
-                            <button
-                              type="button"
-                              onClick={() => handleDownload(doc)}
-                              disabled={isDownloading}
-                              title={`Download IDOC ${idocId}`}
-                              className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 disabled:opacity-50 transition whitespace-nowrap"
-                            >
-                              {isDownloading
-                                ? <ArrowPathIcon className="w-3.5 h-3.5 animate-spin" />
-                                : <ArrowDownTrayIcon className="w-3.5 h-3.5" />}
-                              {isDownloading ? 'Downloading…' : 'Download'}
-                            </button>
-                          ) : (
-                            <span className="text-gray-300">&mdash;</span>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+      {alert && <Alert type={alert.type} message={alert.message} />}
 
-          {totalPages > 1 && (
-            <div className="px-6 py-3 border-t border-gray-100 flex items-center justify-between">
-              <button type="button" onClick={() => handleSearch(page - 1)} disabled={page === 1 || searching}
-                className="px-4 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition">← Previous</button>
-              <button type="button" onClick={() => handleSearch(page + 1)} disabled={page >= totalPages || searching}
-                className="px-4 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition">Next →</button>
-            </div>
-          )}
+      {/* Initial loading skeleton */}
+      {loadingProjects && projects.length === 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <ArrowPathIcon className="w-10 h-10 text-blue-400 animate-spin mx-auto" />
+          <p className="mt-3 text-sm text-gray-500">Fetching all projects from Wrench…</p>
         </div>
       )}
+
+      {/* Breadcrumb */}
+      {projects.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 px-4 py-2 flex flex-wrap items-center gap-1.5 text-sm">
+          <button
+            type="button"
+            onClick={() => setBrowsePath([])}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md transition ${
+              browsePath.length === 0
+                ? 'bg-blue-100 text-blue-700 font-semibold'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            <FolderIcon className="w-4 h-4" /> All Projects
+            <span className="ml-1 text-xs text-gray-400">
+              ({filterText ? `${filteredProjects.length}/${projects.length}` : projects.length})
+            </span>
+          </button>
+          {browsePath.map((seg, i) => (
+            <React.Fragment key={`${seg}-${i}`}>
+              <span className="text-gray-300">›</span>
+              <button
+                type="button"
+                onClick={() => setBrowsePath(browsePath.slice(0, i + 1))}
+                className={`px-2 py-1 rounded-md transition truncate max-w-[260px] ${
+                  i === browsePath.length - 1
+                    ? 'bg-blue-100 text-blue-700 font-semibold'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+                title={seg}
+              >
+                {i === 0 ? <span className="font-mono">{seg}</span> : seg}
+              </button>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+
+      {/* PROJECT GRID (root) */}
+      {browsePath.length === 0 && !loadingProjects && (
+        filteredProjects.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
+            <FolderIcon className="w-10 h-10 text-gray-300 mx-auto" />
+            <p className="mt-3 text-sm text-gray-500">
+              {projects.length === 0
+                ? 'No projects returned by Wrench. Verify the connection in Configuration.'
+                : 'No projects match the filter.'}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {filteredProjects.map((proj) => (
+              <button
+                type="button"
+                key={proj.order_no}
+                onClick={() => setBrowsePath([proj.order_no])}
+                className="text-left group p-4 bg-white border border-gray-200 rounded-xl hover:border-blue-400 hover:shadow-md hover:-translate-y-0.5 transition"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shrink-0 shadow-sm">
+                      <FolderIcon className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-mono font-bold text-gray-900 group-hover:text-blue-700 transition">
+                        {proj.order_no}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate" title={proj.order_description}>
+                        {proj.order_description || <span className="italic text-gray-300">No description</span>}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronDownIcon className="w-4 h-4 text-gray-400 group-hover:text-blue-500 -rotate-90 shrink-0 transition" />
+                </div>
+                <div className="mt-3 flex items-center gap-2 text-xs">
+                  <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 font-medium">
+                    {proj.transmittal_count} transmittal{proj.transmittal_count === 1 ? '' : 's'}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )
+      )}
+
+      {/* PROJECT / FOLDER drill-down */}
+      {browsePath.length >= 1 && (() => {
+        const orderNo = browsePath[0]
+        const cache   = projectDocsCache[orderNo]
+        if (cache?.loading) {
+          return (
+            <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+              <ArrowPathIcon className="w-8 h-8 text-blue-400 animate-spin mx-auto" />
+              <p className="mt-3 text-sm text-gray-500">Loading documents for {orderNo}…</p>
+            </div>
+          )
+        }
+        if (cache?.error) {
+          return <Alert type="error" message={cache.error} />
+        }
+        if (!cache?.docs) return null
+        if (cache.docs.length === 0) {
+          const vState  = verifyState[orderNo] || {}
+          const vReport = vState.report
+          const verdict = vReport?.conclusion?.verdict
+          // Soft-coded verdict → fully-static class mapping (Tailwind JIT-safe)
+          const _VERDICT_STYLES = {
+            no_documents_for_project:     { title: 'Confirmed: no documents linked to this project',
+                                            box: 'bg-amber-50 border-amber-200',   text: 'text-amber-800',   sub: 'text-amber-700' },
+            documents_exist_unexpectedly: { title: 'Documents exist — refresh required',
+                                            box: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-800', sub: 'text-emerald-700' },
+            svc_url_missing:              { title: 'DocumentSearch SVC URL is missing',
+                                            box: 'bg-rose-50 border-rose-200',     text: 'text-rose-800',    sub: 'text-rose-700' },
+            doc_search_unreachable:       { title: 'DocumentSearch endpoint is unreachable',
+                                            box: 'bg-rose-50 border-rose-200',     text: 'text-rose-800',    sub: 'text-rose-700' },
+            wrench_instance_empty:        { title: 'Wrench instance has no indexed documents',
+                                            box: 'bg-slate-50 border-slate-200',   text: 'text-slate-800',   sub: 'text-slate-700' },
+            config_error:                 { title: 'Wrench configuration error',
+                                            box: 'bg-rose-50 border-rose-200',     text: 'text-rose-800',    sub: 'text-rose-700' },
+            unknown:                      { title: 'Inconclusive — see details',
+                                            box: 'bg-slate-50 border-slate-200',   text: 'text-slate-800',   sub: 'text-slate-700' },
+          }
+          const vStyle = _VERDICT_STYLES[verdict] || _VERDICT_STYLES.unknown
+          return (
+            <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
+              <p className="text-sm text-gray-500">{_PROJECT_DOC_EMPTY_MSG} {orderNo}.</p>
+              {cache.note && (
+                <p className="mt-2 text-xs text-gray-400 max-w-xl mx-auto">{cache.note}</p>
+              )}
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => runVerification(orderNo)}
+                  disabled={vState.loading}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-60 text-sm"
+                >
+                  {vState.loading ? (
+                    <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                  ) : null}
+                  {vState.loading ? 'Verifying…' : (vReport ? 'Re-run verification' : 'Verify & validate configuration')}
+                </button>
+              </div>
+
+              {vState.error && (
+                <div className="mt-4 max-w-2xl mx-auto">
+                  <Alert type="error" message={vState.error} />
+                </div>
+              )}
+
+              {vReport && (
+                <div className={`mt-5 max-w-3xl mx-auto text-left rounded-lg border ${vStyle.box} p-4`}>
+                  <p className={`text-sm font-semibold ${vStyle.text}`}>{vStyle.title}</p>
+                  {vReport.conclusion?.reasons?.length > 0 && (
+                    <ul className={`mt-2 text-xs ${vStyle.sub} list-disc list-inside space-y-1`}>
+                      {vReport.conclusion.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                    </ul>
+                  )}
+                  {vReport.conclusion?.recommendations?.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-xs font-semibold text-gray-700">Recommendations</p>
+                      <ul className="mt-1 text-xs text-gray-600 list-disc list-inside space-y-1">
+                        {vReport.conclusion.recommendations.map((r, i) => <li key={i}>{r}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  <details className="mt-3">
+                    <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                      Show diagnostic evidence
+                    </summary>
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-gray-600">
+                      <div className="bg-white border border-gray-200 rounded p-2">
+                        <p className="font-semibold text-gray-700">Configuration</p>
+                        <p>base_url: {vReport.config?.has_base_url ? '✓ set' : '✗ missing'}</p>
+                        <p>svc_url: {vReport.config?.has_svc_url ? '✓ set' : '✗ missing'}</p>
+                        <p>token: {vReport.token?.acquired ? '✓ acquired' : `✗ ${vReport.token?.error || 'failed'}`}</p>
+                      </div>
+                      <div className="bg-white border border-gray-200 rounded p-2">
+                        <p className="font-semibold text-gray-700">DocumentSearch</p>
+                        <p>broad: {vReport.doc_search?.broad?.ok
+                          ? `✓ total=${vReport.doc_search.broad.total}`
+                          : `✗ ${vReport.doc_search?.broad?.error?.slice(0, 80) || 'failed'}`}</p>
+                        <p>by ORDER_NO: {vReport.doc_search?.by_order_no?.ok
+                          ? `✓ total=${vReport.doc_search.by_order_no.total}`
+                          : `✗ ${vReport.doc_search?.by_order_no?.error?.slice(0, 80) || 'failed'}`}</p>
+                      </div>
+                      <div className="bg-white border border-gray-200 rounded p-2 sm:col-span-2">
+                        <p className="font-semibold text-gray-700">REST per-transmittal probes</p>
+                        <ul className="mt-1 space-y-0.5">
+                          {(vReport.rest_probes || []).map((p, i) => (
+                            <li key={i} className="font-mono text-[11px]">
+                              {p.ok ? '✓' : '✗'} {p.path} → {p.http_status ?? 'no response'}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              )}
+            </div>
+          )
+        }
+        if (!currentNode) {
+          return (
+            <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
+              <p className="text-sm text-gray-500">
+                Folder not found.{' '}
+                <button onClick={() => setBrowsePath([orderNo])} className="text-blue-600 hover:underline">
+                  Return to project root
+                </button>
+              </p>
+            </div>
+          )
+        }
+        const node = currentNode.node
+        const subFolders = Object.values(node.folders || {})
+          .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, _SORT_LOCALE_OPTS))
+        const docs = node.documents || []
+        const isProjectRoot = currentNode.kind === 'project'
+
+        return (
+          <div className="space-y-4">
+            {isProjectRoot && (
+              <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-xl">
+                <p className="text-xs text-blue-600 font-medium uppercase tracking-wider">Project</p>
+                <p className="font-mono font-bold text-xl text-blue-900">{node.order_no}</p>
+                {node.order_description && <p className="text-sm text-blue-700">{node.order_description}</p>}
+                <p className="text-xs text-blue-600 mt-1">
+                  {node.totalDocs} document{node.totalDocs === 1 ? '' : 's'} ·{' '}
+                  {subFolders.length} top-level folder{subFolders.length === 1 ? '' : 's'} ·{' '}
+                  {docs.length} at root
+                </p>
+              </div>
+            )}
+
+            {subFolders.length > 0 && (
+              <div className="bg-white rounded-xl border border-gray-200 p-4">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                  Folders ({subFolders.length})
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+                  {subFolders.map((folder) => (
+                    <button
+                      type="button"
+                      key={folder.name}
+                      onClick={() => setBrowsePath([...browsePath, folder.name])}
+                      className="flex items-center gap-2 p-2.5 text-left bg-gray-50 border border-gray-200 rounded-lg hover:border-amber-400 hover:bg-amber-50 transition group"
+                    >
+                      <div className="w-8 h-8 rounded-md bg-amber-100 group-hover:bg-amber-200 flex items-center justify-center shrink-0 transition">
+                        <FolderIcon className="w-4 h-4 text-amber-700" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-800 truncate" title={folder.name}>{folder.name}</p>
+                        <p className="text-xs text-gray-500">{folder.totalDocs} doc{folder.totalDocs === 1 ? '' : 's'}</p>
+                      </div>
+                      <ChevronDownIcon className="w-4 h-4 text-gray-300 group-hover:text-amber-500 -rotate-90 shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {docs.length > 0 && (
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    Documents ({docs.length})
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        {DOC_COLUMNS
+                          .filter((c) => c.key !== 'ORDER_NO' && c.key !== 'GENEALOGY_STRING')
+                          .map((col) => (
+                            <th key={col.key} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">
+                              {col.label}
+                            </th>
+                          ))}
+                        <th className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {docs.map((doc, idx) => {
+                        const idocId = doc[_IDOC_KEY]
+                        const isDl   = Boolean(idocId && downloading[idocId])
+                        return (
+                          <tr key={idx} className="hover:bg-blue-50/40 transition">
+                            {DOC_COLUMNS
+                              .filter((c) => c.key !== 'ORDER_NO' && c.key !== 'GENEALOGY_STRING')
+                              .map((col) => (
+                                <td key={col.key} className="px-3 py-2 text-gray-700 max-w-[220px] truncate" title={doc[col.key] || ''}>
+                                  {doc[col.key] || <span className="text-gray-300">—</span>}
+                                </td>
+                              ))}
+                            <td className="px-3 py-2">
+                              {idocId ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownload(doc)}
+                                  disabled={isDl}
+                                  className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-600 border border-blue-300 rounded-md hover:bg-blue-50 disabled:opacity-50 transition"
+                                >
+                                  {isDl ? <ArrowPathIcon className="w-3 h-3 animate-spin" /> : <ArrowDownTrayIcon className="w-3 h-3" />}
+                                  {isDl ? '…' : 'Download'}
+                                </button>
+                              ) : <span className="text-gray-300">—</span>}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {subFolders.length === 0 && docs.length === 0 && (
+              <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
+                <p className="text-sm text-gray-500">This folder is empty.</p>
+              </div>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }
@@ -1807,6 +2646,11 @@ const DEFAULT_S3_PREFIX    = 'wrench/'
 const S3_BUCKET_DISPLAY    = 'wrench-radai'  // cosmetic label only
 const S3_POLL_INTERVAL_MS  = 5000            // auto-refresh when a job is in_progress
 
+// Library Mirror Watcher — soft-coded labels / defaults
+const _LIB_WATCHER_TITLE      = 'Library Mirror Watcher'
+const _LIB_WATCHER_SUBTITLE   = 'Realtime Wrench ↔ S3 — same folder hierarchy as Wrench'
+const _LIB_WATCHER_HELP       = 'Continuously detects added / changed documents in Wrench and syncs them to S3 under library/{order_no}/{discipline}/{doc_type}/{doc_no}/rev_{revision}/'
+
 const S3SyncPanel = ({ configured, onGoToConfig }) => {
   const [jobs, setJobs]                   = useState([])
   const [loadingJobs, setLoadingJobs]     = useState(false)
@@ -1816,6 +2660,12 @@ const S3SyncPanel = ({ configured, onGoToConfig }) => {
   const [entityType, setEntityType]       = useState('transmittals')
   const [s3Prefix, setS3Prefix]           = useState(DEFAULT_S3_PREFIX)
   const [showAdvanced, setShowAdvanced]   = useState(false)
+
+  // Library Mirror Watcher state — additive
+  const [libOrderNo,   setLibOrderNo]   = useState('')
+  const [libStarting,  setLibStarting]  = useState(false)
+  const [libAlert,     setLibAlert]     = useState(null)
+  const [libWatchers,  setLibWatchers]  = useState([])
 
   const loadJobs = useCallback(async () => {
     try {
@@ -1869,6 +2719,52 @@ const S3SyncPanel = ({ configured, onGoToConfig }) => {
   const activeRealtimeJob = jobs.find(
     (j) => j.mode === 'realtime' && (j.status === 'in_progress' || j.status === 'pending'),
   )
+
+  // Library Mirror Watcher handlers — additive
+  const loadLibWatchers = useCallback(async () => {
+    try {
+      const res = await wrenchService.getLibraryWatchers()
+      setLibWatchers(res.data || [])
+    } catch { /* silent */ }
+  }, [])
+
+  useEffect(() => {
+    if (!configured) return
+    loadLibWatchers()
+    const t = setInterval(loadLibWatchers, S3_POLL_INTERVAL_MS)
+    return () => clearInterval(t)
+  }, [configured, loadLibWatchers])
+
+  const handleStartLibWatcher = async () => {
+    setLibAlert(null)
+    const orderNo = libOrderNo.trim()
+    if (!orderNo) {
+      setLibAlert({ type: 'error', message: 'Project ORDER_NO is required.' })
+      return
+    }
+    setLibStarting(true)
+    try {
+      await wrenchService.startLibraryWatcher({ order_no: orderNo, s3_prefix: s3Prefix })
+      setLibAlert({ type: 'success',
+        message: `Library mirror started for project ${orderNo}. S3 will stay in sync with Wrench changes.` })
+      await loadLibWatchers()
+    } catch (err) {
+      setLibAlert({ type: 'error',
+        message: err.response?.data?.detail || 'Failed to start the library watcher.' })
+    } finally {
+      setLibStarting(false)
+    }
+  }
+
+  const handleStopLibWatcher = async (jobId) => {
+    try {
+      await wrenchService.stopS3Job(jobId)
+      await loadLibWatchers()
+    } catch (err) {
+      setLibAlert({ type: 'error',
+        message: err.response?.data?.detail || 'Failed to stop the watcher.' })
+    }
+  }
 
   if (!configured) {
     return (
@@ -2015,6 +2911,101 @@ const S3SyncPanel = ({ configured, onGoToConfig }) => {
               : <CloudArrowUpIcon className="w-4 h-4" />}
             {starting ? 'Starting…' : `Start ${mode === 'batch' ? 'Batch Export' : 'Real-time Export'}`}
           </button>
+        </div>
+      </div>
+
+      {/* ── Library Mirror Watcher (continuous Wrench → S3 sync) ─────────────── */}
+      <div className="bg-white rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-200 border border-gray-200/80 overflow-hidden">
+        <div className="px-6 py-5 bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-500">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center ring-1 ring-white/20">
+                <ArrowPathIcon className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-white">{_LIB_WATCHER_TITLE}</h3>
+                <p className="text-xs text-emerald-100/80">{_LIB_WATCHER_SUBTITLE}</p>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono bg-white/20 text-white border border-white/30 backdrop-blur-sm">
+              library/{'{order_no}'}/…
+            </span>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {libAlert && <Alert type={libAlert.type} message={libAlert.message} />}
+          <p className="text-xs text-gray-500">{_LIB_WATCHER_HELP}</p>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Project ORDER_NO <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={libOrderNo}
+                onChange={(e) => setLibOrderNo(e.target.value)}
+                placeholder="e.g. 5900620"
+                className="w-full px-3 py-2 text-sm font-mono border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none transition"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleStartLibWatcher}
+              disabled={libStarting || !libOrderNo.trim()}
+              className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-50 text-white text-sm font-semibold rounded-xl shadow-md shadow-emerald-400/25 transition-all"
+            >
+              {libStarting
+                ? <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                : <ArrowPathIcon className="w-4 h-4" />}
+              {libStarting ? 'Starting…' : 'Start Library Sync'}
+            </button>
+          </div>
+
+          {libWatchers.length > 0 && (
+            <div className="mt-2 border border-gray-200 rounded-xl overflow-hidden">
+              <table className="min-w-full text-xs">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    {['Job', 'Order No', 'Status', 'Uploaded', 'Last Tick', ''].map((h) => (
+                      <th key={h} className="px-3 py-2 text-left font-semibold text-gray-600 whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {libWatchers.map((w) => {
+                    const lw = w.job_details?.library_watcher || {}
+                    return (
+                      <tr key={w.id} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-mono text-gray-500">#{w.id}</td>
+                        <td className="px-3 py-2 font-mono">{lw.order_no || w.job_details?.order_no || '—'}</td>
+                        <td className="px-3 py-2">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${S3_STATUS_STYLES[w.status] || ''}`}>
+                            {w.status === 'in_progress' && <ArrowPathIcon className="w-3 h-3 mr-1 animate-spin" />}
+                            {w.status.replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 font-mono">{lw.uploaded_total ?? w.records_exported ?? 0}</td>
+                        <td className="px-3 py-2 text-gray-500">{lw.last_tick || '—'}</td>
+                        <td className="px-3 py-2">
+                          {(w.status === 'in_progress' || w.status === 'pending') && (
+                            <button
+                              type="button"
+                              onClick={() => handleStopLibWatcher(w.id)}
+                              className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 border border-red-300 rounded-lg hover:bg-red-50 transition"
+                            >
+                              <StopCircleIcon className="w-3 h-3" /> Stop
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 

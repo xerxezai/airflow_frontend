@@ -5,8 +5,16 @@
  * Session tokens are managed server-side (rolling token pattern).
  */
 import apiService from './api.service'
+import { API_TIMEOUT_WRENCH } from '../config/api.config'
 
 const BASE = '/wrench'
+
+// ── Soft-coded per-endpoint axios overrides ──────────────────────────────────
+// Wrench upstream endpoints frequently take >2 min on cold cache or on tenants
+// with thousands of transmittals (the REST API ignores pagination params and
+// returns the full set every call). Use an extended timeout for these requests
+// only — other backend routes keep the default ~120 s.
+const _WRENCH_LONG_OPTS = { timeout: API_TIMEOUT_WRENCH }
 
 const wrenchService = {
   // ── Config ───────────────────────────────────────────────────────────────
@@ -23,6 +31,14 @@ const wrenchService = {
 
   /** Test connectivity – performs a real Wrench login to validate credentials */
   verifyConnection: () => apiService.post(`${BASE}/config/verify/`),
+
+  /**
+   * Auto-detect the Wrench DocumentSearch SVC URL by probing common patterns.
+   * @param {object} overrides – optional { base_url, svc_url } to probe before saving.
+   * Returns { recommended: string|null, candidates: [{url, reachable, status_code, note}] }
+   */
+  discoverSvcUrl: (overrides = {}) =>
+    apiService.post(`${BASE}/config/discover-svc-url/`, overrides),
 
   /** Delete the active config (super admin only) */
   deleteConfig: (id) => apiService.delete(`${BASE}/config/${id}/`),
@@ -55,7 +71,8 @@ const wrenchService = {
    * }
    * Returns { total, documents: [{DOC_NO, DOC_DESCRIPTION, ORDER_NO, ...}] }
    */
-  searchDocuments: (filters = {}) => apiService.post(`${BASE}/sync/search-documents/`, filters),
+  searchDocuments: (filters = {}) =>
+    apiService.post(`${BASE}/sync/search-documents/`, filters, _WRENCH_LONG_OPTS),
 
   /**
    * Fetch unique discipline codes and document numbers from a sample search.
@@ -70,7 +87,10 @@ const wrenchService = {
    * @param {number} pageSize
    */
   listTransmittals: (page = 1, pageSize = 100) =>
-    apiService.get(`${BASE}/sync/list-transmittals/`, { params: { page, page_size: pageSize } }),
+    apiService.get(`${BASE}/sync/list-transmittals/`, {
+      params:  { page, page_size: pageSize },
+      timeout: API_TIMEOUT_WRENCH,
+    }),
 
   /**
    * Fetch documents linked to a transmittal via its ORDER_NO (and optionally TRANS_ID).
@@ -89,6 +109,45 @@ const wrenchService = {
         page,
         page_size: pageSize,
       },
+      timeout: API_TIMEOUT_WRENCH,
+    }),
+
+  /**
+   * Run a soft-coded diagnostic for the "empty documents" state of a project.
+   * Returns a structured verdict explaining whether the project genuinely has
+   * no documents in Wrench, or the empty result is a config/endpoint issue.
+   */
+  verifyTransmittalDocuments: (orderNo) =>
+    apiService.get(`${BASE}/sync/trans-documents/verify/`, {
+      params:  { order_no: orderNo },
+      timeout: API_TIMEOUT_WRENCH,
+    }),
+
+  /**
+   * AI-assisted P&ID document recommendation for a project.
+   * Backend uses soft-coded pattern scoring (no LLM call).
+   * Either orderNo or projectName must be provided.
+   */
+  getPIDRecommendations: ({ orderNo = '', projectName = '', drawingHint = '', top = 5 } = {}) =>
+    apiService.get(`${BASE}/sync/pid-recommendations/`, {
+      params: {
+        ...(orderNo     ? { order_no:     orderNo }     : {}),
+        ...(projectName ? { project_name: projectName } : {}),
+        ...(drawingHint ? { drawing_hint: drawingHint } : {}),
+        top,
+      },
+      timeout: API_TIMEOUT_WRENCH,
+    }),
+
+  /**
+   * Deduplicated Wrench project list for dropdowns (cached on the backend).
+   * Pass `{ refresh: true }` to bypass the server-side cache.
+   * Returns { total, cached, projects: [{ order_no, order_description, label }] }
+   */
+  listWrenchProjects: ({ refresh = false } = {}) =>
+    apiService.get(`${BASE}/sync/projects/`, {
+      params:  refresh ? { refresh: 1 } : {},
+      timeout: API_TIMEOUT_WRENCH,
     }),
 
   // ── S3 Export ─────────────────────────────────────────────────────────────
@@ -106,6 +165,29 @@ const wrenchService = {
 
   /** Stop a running real-time S3 export job */
   stopS3Job: (id) => apiService.post(`${BASE}/s3-sync/${id}/stop/`),
+
+  // ── Project Document Mirror (Wrench → S3, actual file bytes) ──────────────
+  /**
+   * Start a Wrench → S3 mirror that copies actual document bytes of a project.
+   * @param {object} payload – { order_no: string, mode?: 'batch'|'realtime', s3_prefix?: string }
+   */
+  startProjectExport: (payload) =>
+    apiService.post(`${BASE}/s3-sync/project-export/`, payload),
+
+  // ── Library Mirror Watcher (continuous, change-driven sync) ───────────────
+  /**
+   * Start a continuous Wrench → S3 library mirror for a project.
+   * Mirrors the Wrench library hierarchy and re-syncs added/changed docs every tick.
+   * @param {object} payload – { order_no: string, s3_prefix?: string }
+   */
+  startLibraryWatcher: (payload) =>
+    apiService.post(`${BASE}/s3-sync/library-watch/start/`, payload),
+
+  /** List recent library watchers, optionally filtered by order_no */
+  getLibraryWatchers: (orderNo) =>
+    apiService.get(`${BASE}/s3-sync/library-watch/status/`, {
+      params: orderNo ? { order_no: orderNo } : undefined,
+    }),
 
   // ── Token Injection ───────────────────────────────────────────────────────
   /**

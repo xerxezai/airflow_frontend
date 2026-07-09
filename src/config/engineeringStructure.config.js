@@ -28,6 +28,9 @@ const PID_NAMING_CONFIG = {
   longDescription: 'Advanced P&ID quality analysis with AI-powered error detection, standards compliance checking, and automated recommendations'
 }
 
+// SOFT-CODED: Toggle visibility of Digitization > Datasheets in frontend navigation
+const ENABLE_DIGITIZATION_DATASHEET_FEATURE = false
+
 /**
  * Engineering Disciplines Configuration
  * Each discipline can have multiple sub-features
@@ -106,7 +109,7 @@ export const ENGINEERING_DISCIPLINES = {
         icon: TableCellsIcon,
         path: '/engineering/process/line-list',
         description: 'Extract 8 base columns from P&ID (P&ID-only, no enrichment)',
-        moduleCode: 'pid_analysis'
+        moduleCode: 'pid_line_list'
       }
       ,
       {
@@ -116,7 +119,7 @@ export const ENGINEERING_DISCIPLINES = {
         icon: TableCellsIcon,
         path: '/engineering/process/equipment-list',
         description: 'Extract equipment tags (Vessels, Pumps, HE, Reactors…) from P&ID with type classification and line connections',
-        moduleCode: 'pid_analysis',
+        moduleCode: 'pid_equipment_list',
         badge: 'NEW'
       }
     ]
@@ -139,7 +142,7 @@ export const ENGINEERING_DISCIPLINES = {
         icon: TableCellsIcon,
         path: '/engineering/piping/critical-line-list',
         description: '5-document upload (P&ID+PFD+HMB+PMS+NACE) for full 35-column extraction with enrichment',
-        moduleCode: 'designiq',
+        moduleCode: 'piping_critical_line_list',
         badge: 'FULL'
       },
       {
@@ -183,6 +186,19 @@ export const ENGINEERING_DISCIPLINES = {
         description: 'Comprehensive instrument index management',
         moduleCode: 'instrument_index',
         badge: 'New'
+      },
+      // SOFT-CODED: IO List promoted from the Datasheets hub to a first-class
+      // sub-feature under 1.3 Instrument (route unchanged — reuses existing
+      // IOListPage at /engineering/instrument/datasheet/io-list).
+      {
+        id: 'instrumentIoList',
+        name: 'IO List',
+        fullName: 'Instrument IO List',
+        icon: CircleStackIcon,
+        path: '/engineering/instrument/datasheet/io-list',
+        description: 'Generate a canonical Input/Output list from the instrument register, or run a deterministic QC on an existing list',
+        moduleCode: 'instrument_io_list',
+        badge: 'Generator + QC'
       },
       {
         id: 'instrumentDataSheet',
@@ -297,16 +313,18 @@ export const ENGINEERING_DISCIPLINES = {
         moduleCode: 'spec_customization',
         badge: 'AI'
       },
-      {
-        id: 'digitizationDatasheet',
-        name: 'Datasheets',
-        fullName: 'Digitization Datasheets',
-        icon: DocumentTextIcon,
-        path: '/engineering/digitization/datasheet',
-        description: 'Digital transformation datasheets and documentation',
-        moduleCode: 'digitization_datasheet',
-        badge: 'New'
-      },
+      ...(ENABLE_DIGITIZATION_DATASHEET_FEATURE
+        ? [{
+          id: 'digitizationDatasheet',
+          name: 'Datasheets',
+          fullName: 'Digitization Datasheets',
+          icon: DocumentTextIcon,
+          path: '/engineering/digitization/datasheet',
+          description: 'Digital transformation datasheets and documentation',
+          moduleCode: 'digitization_datasheet',
+          badge: 'New'
+        }]
+        : []),
       {
         id: 'nonTeffMetadata',
         name: 'SPF-NON-TEF',

@@ -21,6 +21,7 @@ import {
   XCircleIcon,
 } from '@heroicons/react/24/outline';
 import apiClient from '../../../services/api.service';
+import axios from 'axios';
 
 // ---------------------------------------------------------------------------
 // SOFT-CODED constants
@@ -30,6 +31,44 @@ const BULK_API = '/non-teff/batch';
 const POLL_INTERVAL_MS = 2500;
 const MAX_CELL_WIDTH_PX = 320;
 const PAGE_SIZE = 100;
+
+// Columns whose value is a comma-joined list — rendered as a chip
+// grid instead of a single truncated line. Soft-coded:
+//   • `columnKeys`     opt-in column allow-list
+//   • `columnsPerRow`  per-column override of how many chips fit per row
+//                      (CSS grid — chips share equal-width tracks so the
+//                      cell height stays compact for short numeric values
+//                      like Unit while still wrapping cleanly for long
+//                      alpha-num Tag tokens).
+//   • `maxVisible`     per-column overflow threshold; remainder collapses
+//                      into a "+N more" pill (tooltip lists the rest).
+//   • `cellWidthPx`    per-column max cell width.
+const MULTI_VALUE_DISPLAY = {
+  enabled: true,
+  columnKeys: ['tag', 'unit', 'contractor_ref'],
+  separator: /\s*,\s*/,
+  // Defaults applied when a column-specific override is absent.
+  defaults: {
+    columnsPerRow: 1,          // 1 = flex-wrap (legacy behaviour)
+    maxVisible:    12,
+    cellWidthPx:   360,
+  },
+  // Per-column tuning. Unit values are short (≤5 digits) so 5 per row
+  // collapses the column height dramatically without truncating any
+  // value. Tag values are long & variable-width so we let them flex.
+  // Contractor Doc References are mid-length codes (e.g.
+  // "5610Y-STC-01-1381-026") — 2 per row keeps cells compact without
+  // wrapping any individual reference.
+  perColumn: {
+    unit:           { columnsPerRow: 5, maxVisible: 25, cellWidthPx: 220 },
+    tag:            { columnsPerRow: 1, maxVisible: 12, cellWidthPx: 360 },
+    contractor_ref: { columnsPerRow: 2, maxVisible: 12, cellWidthPx: 380 },
+  },
+  chipClass:
+    'inline-flex items-center justify-center px-1.5 py-0.5 rounded ' +
+    'bg-emerald-50 text-emerald-800 border border-emerald-200 ' +
+    'text-[11px] font-medium leading-tight whitespace-nowrap',
+};
 
 // ─── Upload tuning (soft-coded) ──────────────────────────────────────────
 // Big folders would blow past axios' default 120s global timeout, so we:
@@ -59,6 +98,89 @@ const computeChunkTimeout = (fileCount, byteCount) => {
   const serverMs   = fileCount * t.perFileMs;
   const raw        = t.baseMs + transferMs + serverMs;
   return Math.min(t.maxMs, Math.max(t.minMs, Math.round(raw)));
+};
+
+// ─── Direct-to-S3 presigned upload (large-file path) ─────────────────────
+// Railway's edge proxy caps request bodies at ~100-500 MB and request
+// duration at ~5-10 min. A 2 GB multipart POST is architecturally
+// impossible — the edge kills the upload mid-flight and the browser
+// surfaces the missing CORS headers as a "CORS policy" error.
+//
+// Solution: for any file ≥ NONTEFF_PRESIGNED.minSizeBytes, we ask the
+// backend for a presigned PUT URL, upload the blob STRAIGHT TO S3
+// (bypassing Railway entirely), then call /upload/complete/ with the
+// staged S3 keys so the backend ingests them like a normal upload.
+//
+// Soft-coded — override via Vite env without code change:
+//   VITE_NONTEFF_PRESIGNED_UPLOAD   "false" to disable (forces legacy path)
+//   VITE_NONTEFF_PRESIGNED_MIN_MB   threshold MB (default 50)
+//   VITE_NONTEFF_PUT_TIMEOUT_MS     S3 PUT timeout per file (default 60 min)
+const _ntEnvNum = (raw, fallback) => {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+const _ntEnvFlag = (raw, fallback) => {
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  return !['0', 'false', 'no', 'off'].includes(String(raw).toLowerCase());
+};
+const NONTEFF_PRESIGNED = {
+  enabled:       _ntEnvFlag(import.meta.env?.VITE_NONTEFF_PRESIGNED_UPLOAD, true),
+  minSizeBytes:  _ntEnvNum(import.meta.env?.VITE_NONTEFF_PRESIGNED_MIN_MB, 50) * 1024 * 1024,
+  putTimeoutMs:  _ntEnvNum(import.meta.env?.VITE_NONTEFF_PUT_TIMEOUT_MS, 60 * 60 * 1000),
+  endpoints: {
+    presign:  (bid) => `${BULK_API}/${bid}/upload/presign/`,
+    complete: (bid) => `${BULK_API}/${bid}/upload/complete/`,
+  },
+};
+
+/**
+ * Upload ONE file directly to S3 via a presigned PUT URL.
+ * Returns the {s3_key, file_name, relative_path, size} record needed by
+ * the `/upload/complete/` endpoint. Throws on any failure so the caller
+ * can fall back to the legacy multipart path.
+ *
+ * The S3 PUT uses a fresh `axios` instance (NOT `apiClient`) so the JWT
+ * Authorization header isn't sent — S3 would reject the signature otherwise.
+ * `transformRequest: [(d) => d]` keeps axios from JSON-stringifying the Blob.
+ */
+const _uploadOneFileToS3 = async (batchId, file, onProgress) => {
+  const presignRes = await apiClient.post(
+    NONTEFF_PRESIGNED.endpoints.presign(batchId),
+    {
+      filename:      file.name,
+      content_type:  file.type || 'application/octet-stream',
+      size:          file.size,
+      relative_path: file.webkitRelativePath || file.name,
+    },
+    { timeout: 30000 },
+  );
+
+  const p = presignRes?.data || {};
+  if (!p.enabled || !p.upload_url || !p.s3_key) {
+    const reason = p.reason || 'presign disabled';
+    const err = new Error(`presign not available: ${reason}`);
+    err.code = 'PRESIGN_DISABLED';
+    throw err;
+  }
+
+  await axios.put(p.upload_url, file, {
+    headers: p.headers || { 'Content-Type': file.type || 'application/octet-stream' },
+    timeout: NONTEFF_PRESIGNED.putTimeoutMs,
+    transformRequest: [(d) => d],            // do not stringify the Blob
+    transitional: { clarifyTimeoutError: true },
+    onUploadProgress: (ev) => {
+      if (!ev?.total) return;
+      onProgress?.(Math.min(ev.loaded, ev.total));
+    },
+  });
+
+  return {
+    s3_key:        p.s3_key,
+    file_name:     file.name,
+    relative_path: file.webkitRelativePath || file.name,
+    size:          file.size,
+    content_type:  file.type || 'application/octet-stream',
+  };
 };
 
 // Only this field is required before upload; everything else is optional and
@@ -416,15 +538,86 @@ const BulkMasterIndex = ({ loadBatchId = null, onSelectItem = null } = {}) => {
 
       for (let ci = 0; ci < chunks.length; ci++) {
         const chunk = chunks[ci];
-        const chunkBytes = chunk.reduce((s, f) => s + f.size, 0);
+
+        // ── Smart dispatcher: large files go direct-to-S3 (presigned PUT),
+        //    small files stay on the legacy multipart path. Falls back to
+        //    multipart for any large file whose presign fails — production
+        //    remains safe even if S3 / boto3 / env vars regress.
+        const largeFiles = NONTEFF_PRESIGNED.enabled
+          ? chunk.filter((f) => f.size >= NONTEFF_PRESIGNED.minSizeBytes)
+          : [];
+        const smallFiles = chunk.filter((f) => !largeFiles.includes(f));
+        const stagedRefs = [];           // {s3_key, file_name, ...} per success
+        const fallbackToMultipart = [];  // large files whose presign failed
+
+        // 1) Direct-to-S3 PUT for each large file (sequential to keep memory
+        //    + bandwidth predictable on slow uplinks). Progress updates are
+        //    relative to the global byte counter so the bar stays smooth.
+        for (let li = 0; li < largeFiles.length; li++) {
+          const f = largeFiles[li];
+          let lastReported = 0;
+          try {
+            const ref = await _uploadOneFileToS3(
+              currentBatch.batch_id,
+              f,
+              (loaded) => {
+                const delta = loaded - lastReported;
+                lastReported = loaded;
+                sentBytes += delta;
+                setUploadProgress(
+                  Math.min(100, Math.round((sentBytes / totalBytes) * 100)),
+                );
+              },
+            );
+            // Make sure we end up exactly at file.size for this file even if
+            // S3 didn't report a final progress event.
+            const tail = f.size - lastReported;
+            if (tail > 0) {
+              sentBytes += tail;
+              setUploadProgress(
+                Math.min(100, Math.round((sentBytes / totalBytes) * 100)),
+              );
+            }
+            stagedRefs.push(ref);
+          } catch (err) {
+            // Roll back the progress we partially counted, then fall back.
+            sentBytes -= lastReported;
+            // eslint-disable-next-line no-console
+            console.warn(
+              '[BulkUpload] presigned path failed for',
+              f.name,
+              '— falling back to multipart:',
+              err?.message || err,
+            );
+            fallbackToMultipart.push(f);
+          }
+        }
+
+        // 2) Notify backend about all S3-staged files in one batched call.
+        if (stagedRefs.length > 0) {
+          await apiClient.post(
+            NONTEFF_PRESIGNED.endpoints.complete(currentBatch.batch_id),
+            { items: stagedRefs },
+            { timeout: 5 * 60 * 1000 },   // server may stream-download — give it room
+          );
+        }
+
+        // 3) Anything that didn't go direct (small + fallback) → legacy
+        //    multipart POST through Django, unchanged behaviour.
+        const multipartFiles = smallFiles.concat(fallbackToMultipart);
+        if (multipartFiles.length === 0) {
+          continue;
+        }
+
+        const chunkBytes = multipartFiles.reduce((s, f) => s + f.size, 0);
         const fd = new FormData();
-        chunk.forEach((f) => {
+        multipartFiles.forEach((f) => {
           fd.append('files', f);
           fd.append('relative_paths', f.webkitRelativePath || f.name);
         });
 
         // Dynamic timeout for THIS chunk (not a fixed global value)
-        const chunkTimeout = computeChunkTimeout(chunk.length, chunkBytes);
+        const chunkTimeout = computeChunkTimeout(multipartFiles.length, chunkBytes);
 
         // Retry loop — network hiccups or a single slow chunk shouldn't abort
         let attempt = 0;
@@ -1339,10 +1532,24 @@ const ReviewGrid = ({
                     && value
                     && value !== 'NA'
                     && !!onSelectItem;
+                  // Soft-coded multi-value columns (Tag, Unit, …): render
+                  // as a vertical chip stack so every value is visible
+                  // instead of getting truncated. Inline-edit still works
+                  // on click — when editing we fall back to a flat input
+                  // so the user can change the entire comma-list.
+                  const isMultiCell = MULTI_VALUE_DISPLAY.enabled
+                    && MULTI_VALUE_DISPLAY.columnKeys.includes(col.key)
+                    && !isEditing
+                    && value
+                    && value !== 'NA'
+                    && typeof value === 'string'
+                    && MULTI_VALUE_DISPLAY.separator.test(value);
                   return (
                     <td key={col.key}
-                        className="px-3 py-1.5 border-b border-slate-100"
-                        style={{ maxWidth: MAX_CELL_WIDTH_PX }}>
+                        className="px-3 py-1.5 border-b border-slate-100 align-top"
+                        style={{ maxWidth: isMultiCell
+                          ? ((MULTI_VALUE_DISPLAY.perColumn[col.key] || MULTI_VALUE_DISPLAY.defaults).cellWidthPx)
+                          : MAX_CELL_WIDTH_PX }}>
                       {isEditing ? (
                         <input
                           autoFocus
@@ -1375,15 +1582,57 @@ const ReviewGrid = ({
                         >
                           {value}
                         </button>
+                      ) : isMultiCell ? (
+                        (() => {
+                          const cfg = {
+                            ...MULTI_VALUE_DISPLAY.defaults,
+                            ...(MULTI_VALUE_DISPLAY.perColumn[col.key] || {}),
+                          };
+                          const parts = value.split(MULTI_VALUE_DISPLAY.separator)
+                            .map((p) => p.trim()).filter(Boolean);
+                          const visible = parts.slice(0, cfg.maxVisible);
+                          const overflow = parts.length - visible.length;
+                          // columnsPerRow > 1 → CSS grid with equal-width
+                          // tracks (compact heights for short tokens like
+                          // unit codes). Otherwise → flex-wrap so long
+                          // variable-width tokens like tags pack naturally.
+                          const useGrid = cfg.columnsPerRow > 1;
+                          const containerStyle = useGrid
+                            ? { display: 'grid',
+                                gridTemplateColumns: `repeat(${cfg.columnsPerRow}, minmax(0, 1fr))`,
+                                gap: '4px' }
+                            : undefined;
+                          const containerClass = useGrid
+                            ? clsx(editable && 'cursor-text hover:bg-emerald-50/40 rounded')
+                            : clsx('flex flex-wrap gap-1', editable && 'cursor-text hover:bg-emerald-50/40 rounded');
+                          return (
+                            <div
+                              onClick={() => editable && setEditingCell({ itemId: it.item_id, colKey: col.key })}
+                              className={containerClass}
+                              style={containerStyle}
+                              title={editable ? `Click to edit — ${value}` : value}
+                            >
+                              {visible.map((p, i) => (
+                                <span key={`${p}-${i}`} className={MULTI_VALUE_DISPLAY.chipClass}>{p}</span>
+                              ))}
+                              {overflow > 0 && (
+                                <span
+                                  className="inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 text-[11px] font-medium leading-tight whitespace-nowrap"
+                                  title={parts.slice(cfg.maxVisible).join(', ')}
+                                >+{overflow} more</span>
+                              )}
+                            </div>
+                          );
+                        })()
                       ) : (
                         <div
-                          onDoubleClick={() => editable && setEditingCell({ itemId: it.item_id, colKey: col.key })}
+                          onClick={() => editable && setEditingCell({ itemId: it.item_id, colKey: col.key })}
                           className={clsx(
                             'truncate',
                             editable && 'cursor-text hover:bg-emerald-50',
                             value === 'NA' && 'text-slate-400 italic',
                           )}
-                          title={value}
+                          title={editable ? `Click to edit — ${value}` : value}
                         >
                           {value || '—'}
                         </div>

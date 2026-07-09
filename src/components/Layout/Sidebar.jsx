@@ -6,6 +6,7 @@ import { API_BASE_URL } from '../../config/api.config'
 import { getSectionTitle } from '../../config/navigationLabels.config'
 import { getEngineeringDisciplines } from '../../config/engineeringStructure.config'
 import { USER_DISPLAY_CONFIG } from '../../config/userDisplay.config'
+import { SIDEBAR } from '../../config/layout.config'
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -27,6 +28,7 @@ import {
   BuildingOffice2Icon,
   RocketLaunchIcon,
   WrenchScrewdriverIcon,
+  EnvelopeIcon,
 } from '@heroicons/react/24/outline'
 
 /**
@@ -34,13 +36,20 @@ import {
  * Professional hierarchical menu for RADAI platform
  */
 
-const Sidebar = ({ isOpen, setIsOpen }) => {
+const Sidebar = ({ isOpen, setIsOpen, isCollapsed: isCollapsedProp, setIsCollapsed: setIsCollapsedProp }) => {
   const navigate = useNavigate()
   const location = useLocation()
   const dispatch = useDispatch()
   const { user } = useSelector((state) => state.auth)
   const [userModules, setUserModules] = useState([])
-  const [isCollapsed, setIsCollapsed] = useState(false)
+  // SOFT-CODED: freshIsAdmin is set from the live /rbac/users/me/ response so that
+  // stale localStorage data does not permanently hide menu items until re-login.
+  const [freshIsAdmin, setFreshIsAdmin] = useState(false)
+  // If parent Layout drives collapse state, use those props; otherwise
+  // fall back to local state so the component still works standalone.
+  const [internalCollapsed, setInternalCollapsed] = useState(false)
+  const isCollapsed = isCollapsedProp !== undefined ? isCollapsedProp : internalCollapsed
+  const setIsCollapsed = setIsCollapsedProp || setInternalCollapsed
   const [expandedSections, setExpandedSections] = useState({
     processEngineering: true,
     // Engineering disciplines
@@ -54,6 +63,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     // Other sections
     crs: true,
     finance: true,
+    human_resource: true,
     projectControl: true,
     procurement: true,
     qhse: true,
@@ -69,7 +79,9 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
   const hasSuperAdminRole = user?.roles?.some(role => 
     role.code === 'super_admin' || role.name === 'Super Administrator'
   )
-  const isAdmin = hasAdminFlags || hasSuperAdminRole
+  // isAdmin: combines stale Redux data with live freshIsAdmin flag so sidebar
+  // shows correctly even when localStorage hasn't been refreshed since login.
+  const isAdmin = hasAdminFlags || hasSuperAdminRole || freshIsAdmin
 
   // Fetch user's accessible modules
   React.useEffect(() => {
@@ -92,6 +104,50 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
         const data = await response.json()
         console.log('🔐 Full user data:', data)
         
+        // ── Derive admin status from live API response ────────────────────
+        // This fixes the stale-localStorage bug where is_staff/is_superuser
+        // may be false in cached Redux state even though the DB is correct.
+        const apiIsAdmin =
+          data.user?.is_staff === true ||
+          data.user?.is_superuser === true ||
+          data.roles?.some(r => r.code === 'super_admin' || r.name === 'Super Administrator')
+        if (apiIsAdmin) {
+          setFreshIsAdmin(true)
+          console.log('✅ Admin status confirmed from live API')
+        }
+
+        // ── Sync Redux store with fresh auth data ─────────────────────────
+        // Dispatches only when the payload actually differs to avoid
+        // triggering an infinite update loop (effect depends on user?.id,
+        // not on the nested user.user object or roles).
+        const shouldUpdateUser = data.user && (
+          data.user.is_staff !== user?.user?.is_staff ||
+          data.user.is_superuser !== user?.user?.is_superuser
+        )
+        const shouldUpdateRoles = data.roles && (
+          JSON.stringify(data.roles) !== JSON.stringify(user?.roles)
+        )
+        if (shouldUpdateUser || shouldUpdateRoles) {
+          dispatch(updateUser({
+            ...(shouldUpdateUser ? { user: data.user } : {}),
+            ...(shouldUpdateRoles ? { roles: data.roles } : {}),
+          }))
+          // Also persist corrected auth data to localStorage so the next
+          // page reload doesn't start with stale Redux state.
+          try {
+            const storedRaw = localStorage.getItem('radai_user_data')
+            const stored = storedRaw ? JSON.parse(storedRaw) : {}
+            const merged = {
+              ...stored,
+              ...(shouldUpdateUser ? { user: data.user } : {}),
+              ...(shouldUpdateRoles ? { roles: data.roles } : {}),
+            }
+            localStorage.setItem('radai_user_data', JSON.stringify(merged))
+            console.log('✅ User auth data persisted to localStorage')
+          } catch (_) { /* non-fatal */ }
+          console.log('✅ User auth data synced from live API')
+        }
+
         // Update Redux store with profile photo and other user data
         // Note: profile_photo currently disabled in backend until S3 CORS configured
         // SOFT-CODED: only dispatch if profile_photo value actually changed
@@ -217,6 +273,15 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
           description: 'Intelligent PFD conversion',
           moduleCode: 'pfd_to_pid',
           badge: 'AI'
+        },
+        {
+          id: 'dataMining',
+          title: '2.4 Data Mining',
+          icon: TableCellsIcon,
+          path: '/data-mining',
+          description: 'AI-powered data integration & transformation',
+          moduleCode: 'data_mining',
+          badge: 'NEW'
         }
       ]
         },
@@ -240,26 +305,62 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
         expanded: expandedSections.finance,
         children: [
           {
-            id: 'financeUpload',
-            title: '3.1 Upload Invoice',
-            path: '/finance/upload',
-            icon: DocumentPlusIcon,
-            moduleCode: 'finance'
-          },
-          {
-            id: 'financeInvoices',
-            title: '3.2 Invoices',
-            path: '/finance/invoices',
-            icon: DocumentTextIcon,
-            moduleCode: 'finance'
-          },
-          {
-            id: 'financeSalarySlip',
-            title: '3.3 Salary Slip',
-            path: '/finance/salary-slip',
+            id: 'financeInvoiceTracker',
+            title: '3.1 Invoice Tracker',
+            path: '/finance/invoice-tracker',
             icon: DocumentTextIcon,
             moduleCode: 'finance',
-            description: 'Generate and manage employee salary slips'
+            description: 'Read-only pipeline view of invoices across the approval workflow'
+          }
+        ]
+      },
+      // ── Section 4: Human Resource ──────────────────────────────────────────
+      {
+        id: 'human_resource',
+        title: getSectionTitle('human_resource'),
+        icon: UsersIcon,
+        type: 'section',
+        expanded: expandedSections.human_resource,
+        children: [
+          {
+            id: 'hrDashboard',
+            title: '4.0 HR Dashboard',
+            icon: ChartBarIcon,
+            path: '/hr',
+            description: 'Consolidated real-time HR command center',
+            moduleCode: 'hr_management'  // matches DB module code
+          },
+          {
+            id: 'hrEmployees',
+            title: '4.1 Employees',
+            icon: UsersIcon,
+            path: '/hr/employees',
+            description: 'Employee records and profiles',
+            moduleCode: 'hr_management'
+          },
+          {
+            id: 'hrPayroll',
+            title: '4.2 Payroll',
+            icon: CurrencyDollarIcon,
+            path: '/hr/payroll',
+            description: 'Payroll processing and management',
+            moduleCode: 'payroll'  // matches DB module code
+          },
+          {
+            id: 'hrLeave',
+            title: '4.3 My Profile',
+            icon: SparklesIcon,
+            path: '/hr/leave',
+            description: 'My leave, attendance, timesheet & payroll',
+            moduleCode: 'hr_self_service'
+          },
+          {
+            id: 'hrOnboarding',
+            title: '4.4 Onboarding | Offboarding',
+            icon: UsersIcon,
+            path: '/hr/onboarding',
+            description: 'Employee lifecycle management',
+            moduleCode: 'hr_onboarding'
           }
         ]
       },
@@ -283,7 +384,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
       children: [
         {
           id: 'projectManagement',
-          title: '5.1 Projects',
+          title: '6.1 Projects',
           icon: FolderIcon,
           path: '/projects',
           description: 'Manage and track projects',
@@ -300,43 +401,51 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
       children: [
         {
           id: 'procurementDashboard',
-          title: '6.1 Dashboard',
+          title: '7.1 Dashboard',
           icon: HomeIcon,
           path: '/procurement',
           description: 'Procurement overview',
-          moduleCode: 'procurement'
+          moduleCode: 'procurement'              // root access / dashboard
+        },
+        {
+          id: 'projects',
+          title: '7.2 Projects',
+          icon: FolderIcon,
+          path: '/procurement/projects',
+          description: 'Project portfolio management',
+          moduleCode: 'procurement'              // project-based procurement
         },
         {
           id: 'vendors',
-          title: '6.2 Vendors',
+          title: '7.3 Vendors',
           icon: UsersIcon,
           path: '/procurement/vendors',
           description: 'Vendor management',
-          moduleCode: 'procurement'
+          moduleCode: 'procurement_vendors'       // granular: vendor management
         },
         {
           id: 'requisitions',
-          title: '6.3 Recommendations',
+          title: '7.4 Recommendations',
           icon: DocumentTextIcon,
           path: '/procurement/requisitions',
           description: 'Purchase recommendations',
-          moduleCode: 'procurement'
+          moduleCode: 'procurement_requisitions'  // granular: purchase requisitions
         },
         {
           id: 'purchaseOrders',
-          title: '6.4 Purchase Orders',
+          title: '7.5 Purchase Orders',
           icon: DocumentPlusIcon,
           path: '/procurement/orders',
           description: 'PO management',
-          moduleCode: 'procurement'
+          moduleCode: 'procurement_orders'        // granular: purchase orders
         },
         {
           id: 'receipts',
-          title: '6.5 Receipts',
+          title: '7.6 Receipts',
           icon: FolderIcon,
           path: '/procurement/receipts',
           description: 'Goods receipt',
-          moduleCode: 'procurement'
+          moduleCode: 'procurement_receipts'      // granular: goods receipt
         }
       ]
     },
@@ -349,7 +458,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
       children: [
         {
           id: 'generalQHSE',
-          title: '7.1 Project Quality',
+          title: '8.1 Project Quality',
           icon: ShieldCheckIcon,
           path: '/qhse/general',
           description: 'Project quality management',
@@ -357,43 +466,43 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
         },
         {
           id: 'detailedView',
-          title: '7.2 Project Quality Details',
+          title: '8.2 Project Quality Details',
           icon: TableCellsIcon,
           path: '/qhse/general/detailed',
           description: 'Detailed project quality view',
-          moduleCode: 'qhse'
+          moduleCode: 'qhse_detailed'
         },
         {
           id: 'qualityManagement',
-          title: '7.3 Quality Management',
+          title: '8.3 Quality Management',
           icon: ChartBarIcon,
           path: '/qhse/general/quality',
           description: 'Quality metrics and audits',
-          moduleCode: 'qhse'
+          moduleCode: 'qhse_quality'
         },
         {
           id: 'healthSafety',
-          title: '7.4 Health & Safety',
+          title: '8.4 Health & Safety',
           icon: ShieldCheckIcon,
           path: '/qhse/general/health-safety',
           description: 'Health and safety management',
-          moduleCode: 'qhse'
+          moduleCode: 'qhse_health_safety'
         },
         {
           id: 'environmental',
-          title: '7.5 Environmental',
+          title: '8.5 Environmental',
           icon: DocumentTextIcon,
           path: '/qhse/general/environmental',
           description: 'Environmental management',
-          moduleCode: 'qhse'
+          moduleCode: 'qhse_environmental'
         },
         {
           id: 'energy',
-          title: '7.6 Energy',
+          title: '8.6 Energy',
           icon: ChartBarIcon,
           path: '/qhse/general/energy',
           description: 'Energy management',
-          moduleCode: 'qhse'
+          moduleCode: 'qhse_energy'
         }
         // SOFT-CODED: AI Interconnected System demo removed (not needed)
         // {
@@ -464,11 +573,22 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
 
   const filteredMenu = filterMenuByModules(menuStructure)
 
+  // SOFT-CODED: Request Access link disabled — remove the push() block to re-enable
+  // filteredMenu.push({
+  //   id: 'requestAccess',
+  //   title: 'Request Access',
+  //   icon: ShieldCheckIcon,
+  //   path: '/request-access',
+  //   type: 'single',
+  //   requiresModule: false,
+  //   description: 'Request access to additional modules',
+  // })
+
   // Add admin section if user is admin
   if (isAdmin) {
     filteredMenu.push({
       id: 'admin',
-      title: '8. Admin',
+      title: getSectionTitle('admin'),
       icon: CogIcon,
       type: 'section',
       expanded: expandedSections.admin,
@@ -476,24 +596,45 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
       children: [
         {
           id: 'adminDashboard',
-          title: '8.1 Dashboard',
+          title: '9.1 Dashboard',
           icon: ChartBarIcon,
           path: '/admin/dashboard',
           description: 'System overview & analytics'
         },
         {
           id: 'userManagement',
-          title: '8.2 Users & Roles',
+          title: '9.2 Users & Roles',
           icon: UsersIcon,
           path: '/admin/users',
           description: 'User accounts & permissions'
         },
         {
+          id: 'roleManagement',
+          title: '9.3 Role & Access Management',
+          icon: ShieldCheckIcon,
+          path: '/admin/roles',
+          description: 'Roles, module permissions & access request approvals'
+        },
+        {
           id: 'wrenchIntegration',
-          title: '8.3 Wrench Integration',
+          title: '9.4 Wrench Integration',
           icon: WrenchScrewdriverIcon,
           path: '/admin/wrench',
           description: 'Wrench Project Platform sync'
+        },
+        {
+          id: 'aiChampion',
+          title: '9.5 AI Champion',
+          icon: SparklesIcon,
+          path: '/admin/ai-champion',
+          description: 'Top AI users leaderboard & badges'
+        },
+        {
+          id: 'enquiryManagement',
+          title: '9.6 Enquiry',
+          icon: EnvelopeIcon,
+          path: '/admin/enquiries',
+          description: 'Customer enquiries from public contact form'
         }
         // SOFT-CODED: Subscription feature disabled for in-house deployment
         // {
@@ -529,7 +670,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
       <aside
         className={`
           fixed inset-y-0 left-0 z-50 top-16
-          ${isCollapsed ? 'w-20' : 'w-72'} bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700
+          ${isCollapsed ? SIDEBAR.collapsed.widthClass : SIDEBAR.expanded.widthClass} bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700
           transform transition-all duration-300 ease-in-out
           ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
           flex flex-col h-[calc(100vh-4rem)]

@@ -1,0 +1,429 @@
+/**
+ * Payroll Intelligence — API Service
+ * All calls go through the existing apiClient (axios instance with auth headers).
+ * Base path: /api/v1/payroll/
+ */
+import apiClient from './api.service'
+
+const BASE = '/payroll'
+const FINANCE = '/finance'
+
+const unwrap = (p) => p.then((r) => r.data)
+
+const payrollService = {
+  // ── Dashboard ──────────────────────────────────────────────────────────────
+  getDashboardSummary: () =>
+    unwrap(apiClient.get(`${BASE}/dashboard-summary/`)),
+
+  // ── Validation Logs ────────────────────────────────────────────────────────
+  getValidationLogs: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/validation-logs/`, { params })),
+
+  resolveValidation: (id) =>
+    unwrap(apiClient.post(`${BASE}/validation-logs/${id}/resolve/`)),
+
+  bulkCreateValidations: (items) =>
+    unwrap(apiClient.post(`${BASE}/validation-logs/bulk-create/`, items)),
+
+  // ── Audit Alerts ───────────────────────────────────────────────────────────
+  getAuditAlerts: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/audit-alerts/`, { params })),
+
+  acknowledgeAlert: (id) =>
+    unwrap(apiClient.post(`${BASE}/audit-alerts/${id}/acknowledge/`)),
+
+  resolveAlert: (id) =>
+    unwrap(apiClient.post(`${BASE}/audit-alerts/${id}/resolve/`)),
+
+  // ── Project Cost Allocations ───────────────────────────────────────────────
+  getProjectCosts: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/project-costs/`, { params })),
+
+  getDeptCostSummary: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/project-costs/department-summary/`, { params })),
+
+  createProjectCost: (data) =>
+    unwrap(apiClient.post(`${BASE}/project-costs/`, data)),
+
+  // ── AI Insight Snapshots ───────────────────────────────────────────────────
+  getAIInsights: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/ai-insights/`, { params })),
+
+  saveAIInsight: (data) =>
+    unwrap(apiClient.post(`${BASE}/ai-insights/`, data)),
+
+  clearExpiredInsights: () =>
+    unwrap(apiClient.delete(`${BASE}/ai-insights/clear-expired/`)),
+
+  // ── Leave Records (imported from HR Excel) ─────────────────────────────────
+  getLeaveRecords: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/leave-records/`, { params })),
+
+  getLeaveRecord: (id) =>
+    unwrap(apiClient.get(`${BASE}/leave-records/${id}/`)),
+
+  // ── Leave Types (master list) ──────────────────────────────────────────────
+  getLeaveTypes: () =>
+    unwrap(apiClient.get(`${BASE}/leave-types/`)),
+
+  // ── Leave Requests (CRUD + workflow) ──────────────────────────────────────
+  getLeaveRequests: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/leave-requests/`, { params })),
+
+  getLeaveRequest: (id) =>
+    unwrap(apiClient.get(`${BASE}/leave-requests/${id}/`)),
+
+  createLeaveRequest: (data) =>
+    unwrap(apiClient.post(`${BASE}/leave-requests/`, data)),
+
+  approveLeaveRequest: (id, note = '') =>
+    unwrap(apiClient.post(`${BASE}/leave-requests/${id}/approve/`, { note })),
+
+  rejectLeaveRequest: (id, note = '') =>
+    unwrap(apiClient.post(`${BASE}/leave-requests/${id}/reject/`, { note })),
+
+  // Stage-1 Reporting Manager actions
+  rmApproveLeaveRequest: (id, note = '') =>
+    unwrap(apiClient.post(`${BASE}/leave-requests/${id}/rm-approve/`, { note })),
+
+  rmRejectLeaveRequest: (id, note = '') =>
+    unwrap(apiClient.post(`${BASE}/leave-requests/${id}/rm-reject/`, { note })),
+
+  cancelLeaveRequest: (id) =>
+    unwrap(apiClient.post(`${BASE}/leave-requests/${id}/cancel/`)),
+
+  // ── Leave Calendar (approved leave per employee per day) ──────────────────
+  getLeaveCalendar: (year, month) =>
+    unwrap(apiClient.get(`${BASE}/leave-calendar/`, { params: { year, month } })),
+
+  // ── Branch employee codes (flat list — used for attendance branch filter) ──
+  // Returns { branch, year, codes: string[] } — lightweight, no pagination
+  getBranchEmployeeCodes: (branch, year) =>
+    unwrap(apiClient.get(`${BASE}/branch-employee-codes/`, { params: { branch, year } })),
+
+  // ── Public Holidays (Abu Dhabi / UAE official calendar + HR-added) ────────
+  // List: any authenticated user may read.
+  // Create/update/deactivate: HR Manager only (enforced by backend).
+  getPublicHolidays: (year, params = {}) =>
+    unwrap(apiClient.get(`${BASE}/public-holidays/`, { params: { year, ...params } })),
+
+  createPublicHoliday: (data) =>
+    unwrap(apiClient.post(`${BASE}/public-holidays/`, data)),
+
+  updatePublicHoliday: (id, data) =>
+    unwrap(apiClient.patch(`${BASE}/public-holidays/${id}/`, data)),
+
+  deactivatePublicHoliday: (id) =>
+    unwrap(apiClient.delete(`${BASE}/public-holidays/${id}/`)),
+
+  // ── Attendance Overrides (HR Manager manual cell corrections) ─────────────
+  // Returns active overrides for a given year+month.
+  // Backend enforces HR Manager permission for write operations.
+  getAttendanceOverrides: (year, month, params = {}) =>
+    unwrap(apiClient.get(`${BASE}/attendance-overrides/`, { params: { year, month, ...params } })),
+
+  createAttendanceOverride: (data) =>
+    unwrap(apiClient.post(`${BASE}/attendance-overrides/`, data)),
+
+  updateAttendanceOverride: (id, data) =>
+    unwrap(apiClient.patch(`${BASE}/attendance-overrides/${id}/`, data)),
+
+  // ── Finance payroll endpoints (reused from finance.service) ────────────────
+  getPayrollRuns: (params = {}) =>
+    unwrap(apiClient.get(`${FINANCE}/payroll-runs/`, { params })),
+
+  getSalarySlips: (params = {}) =>
+    unwrap(apiClient.get(`${FINANCE}/salary-slips/`, { params })),
+
+  getSalarySlip: (id) =>
+    unwrap(apiClient.get(`${FINANCE}/salary-slips/${id}/`)),
+
+  getSalarySlipStats: () =>
+    unwrap(apiClient.get(`${FINANCE}/salary-slips/stats/`)),
+
+  getEmployeeSalaryInfo: (params = {}) =>
+    unwrap(apiClient.get(`${FINANCE}/employee-salary-info/`, { params })),
+
+  approveSalarySlip: (id, data = {}) =>
+    unwrap(apiClient.post(`${FINANCE}/salary-slips/${id}/approve/`, data)),
+
+  rejectSalarySlip: (id, data = {}) =>
+    unwrap(apiClient.post(`${FINANCE}/salary-slips/${id}/reject/`, data)),
+
+  sendSalarySlipEmail: (id) =>
+    unwrap(apiClient.post(`${FINANCE}/salary-slips/${id}/send-email/`)),
+
+  // Edit a salary slip (partial update — any writable field)
+  updateSalarySlip: (id, data) =>
+    unwrap(apiClient.patch(`${FINANCE}/salary-slips/${id}/`, data)),
+
+  // Permanently delete a salary slip
+  deleteSalarySlip: (id) =>
+    unwrap(apiClient.delete(`${FINANCE}/salary-slips/${id}/`)),
+
+  createPayrollRun: (data) =>
+    unwrap(apiClient.post(`${FINANCE}/payroll-runs/`, data)),
+
+  // Edit a payroll run (partial update — only for draft runs)
+  updatePayrollRun: (runId, data) =>
+    unwrap(apiClient.patch(`${FINANCE}/payroll-runs/${runId}/`, data)),
+
+  // Permanently delete a payroll run (draft only)
+  deletePayrollRun: (runId) =>
+    unwrap(apiClient.delete(`${FINANCE}/payroll-runs/${runId}/`)),
+
+  processPayrollRun: (id) =>
+    unwrap(apiClient.post(`${FINANCE}/payroll-runs/${id}/process/`)),
+
+  // Bulk approve all pending-approval slips in a run in one DB update
+  bulkApproveRun: (runId) =>
+    unwrap(apiClient.post(`${FINANCE}/payroll-runs/${runId}/bulk-approve/`)),
+
+  // Queue email delivery for all approved slips in a run
+  bulkSendApprovedRun: (runId) =>
+    unwrap(apiClient.post(`${FINANCE}/payroll-runs/${runId}/bulk-send-approved/`)),
+
+  // ── Auto-generate schedule (PayrollSchedule singleton) ──────────────────────
+  getPayrollSchedule: () =>
+    unwrap(apiClient.get(`${FINANCE}/payroll-schedule/`)),
+  updatePayrollSchedule: (data) =>
+    unwrap(apiClient.patch(`${FINANCE}/payroll-schedule/1/`, data)),
+  triggerAutoRun: () =>
+    unwrap(apiClient.post(`${FINANCE}/payroll-schedule/trigger-now/`)),
+
+  // ── Payroll Workflow (Multi-stage approval: Michelle → Sanglin → Aneef → Aleksi) ──
+  getPayrollWorkflows: (params = {}) =>
+    unwrap(apiClient.get(`${FINANCE}/payroll-workflows/`, { params })),
+  
+  getPayrollWorkflow: (id) =>
+    unwrap(apiClient.get(`${FINANCE}/payroll-workflows/${id}/`)),
+  
+  getMyPendingWorkflows: () =>
+    unwrap(apiClient.get(`${FINANCE}/payroll-workflows/my_pending/`)),
+  
+  getWorkflowStakeholders: () =>
+    unwrap(apiClient.get(`${FINANCE}/payroll-workflows/stakeholders/`)),
+  
+  submitPayrollForReview: (workflowId, data = {}) =>
+    unwrap(apiClient.post(`${FINANCE}/payroll-workflows/${workflowId}/submit/`, data)),
+  
+  approveHR: (workflowId, data = {}) =>
+    unwrap(apiClient.post(`${FINANCE}/payroll-workflows/${workflowId}/approve_hr/`, data)),
+  
+  approveAccounting: (workflowId, data = {}) =>
+    unwrap(apiClient.post(`${FINANCE}/payroll-workflows/${workflowId}/approve_accounting/`, data)),
+  
+  approveFinance: (workflowId, data = {}) =>
+    unwrap(apiClient.post(`${FINANCE}/payroll-workflows/${workflowId}/approve_finance/`, data)),
+  
+  rejectPayrollWorkflow: (workflowId, data = {}) =>
+    unwrap(apiClient.post(`${FINANCE}/payroll-workflows/${workflowId}/reject/`, data)),
+
+  // ── PDF presigned download ────────────────────────────────────────────────
+  downloadSlipPdf: (slipId) =>
+    unwrap(apiClient.get(`${FINANCE}/salary-slips/${slipId}/download-pdf/`)),
+
+  // ── Master Payroll Generator (Sympa + ValueFrame + RADAI merge) ────────────
+  // formData must contain: sympa_file?, valueframe_file?, year, month
+  generateMasterPayroll: (formData) =>
+    unwrap(apiClient.post(`${BASE}/generate-master-payroll/`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })),
+
+  // Download master payroll as Excel binary (returns a Blob)
+  downloadMasterPayrollExcel: (formData) =>
+    apiClient.post(`${BASE}/generate-master-payroll/?format=xlsx`, formData, {
+      headers:      { 'Content-Type': 'multipart/form-data' },
+      responseType: 'blob',
+    }).then(r => r.data),
+
+  // Export (possibly edited) master payroll rows as Excel binary — no file re-upload needed
+  exportRowsToExcel: (year, month, rows) =>
+    apiClient.post(`${BASE}/export-rows-to-excel/`, { year, month, rows }, {
+      responseType: 'blob',
+    }).then(r => r.data).catch(async err => {
+      // When responseType:'blob', axios wraps even error responses as Blobs.
+      // Parse the blob back to JSON so callers see a meaningful error message.
+      if (err?.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text()
+          const json = JSON.parse(text)
+          err.response.data = json
+        } catch (_) { /* leave as blob if unparseable */ }
+      }
+      throw err
+    }),
+
+  // Restore preview: fetch stored employee rows for a past master payroll import
+  getMasterPayrollRows: (importId) =>
+    unwrap(apiClient.get(`${BASE}/master-payroll-history/${importId}/rows/`)),
+
+  // Update a single employee row (draft stage only) — computed fields cascade automatically
+  updateMasterPayrollRow: (importId, rowId, data) =>
+    unwrap(apiClient.patch(`${BASE}/master-payroll-history/${importId}/rows/${rowId}/`, data)),
+
+  // Delete a master payroll import session and all its employee rows
+  deleteMasterPayroll: (importId) =>
+    unwrap(apiClient.delete(`${BASE}/master-payroll-history/${importId}/delete/`)),
+
+  // GPT-4o HR intelligence analysis for a specific payroll run
+  generateAIAnalytics: (runId) =>
+    unwrap(apiClient.post(`${BASE}/ai-analytics/generate/`, { run_id: runId })),
+
+  // ── Master Payroll Workflow ──────────────────────────────────────────────
+  // Retrieve current workflow status + audit log for an import session
+  getMasterPayrollWorkflow: (importId) =>
+    unwrap(apiClient.get(`${BASE}/master-payroll-history/${importId}/workflow/`)),
+
+  // HR Manager: freeze the file (one-time lock)
+  freezeMasterPayroll: (importId, note = '') =>
+    unwrap(apiClient.post(`${BASE}/master-payroll-history/${importId}/freeze/`, { note })),
+
+  // Superadmin: revert to draft
+  unfreezeMasterPayroll: (importId, note = '') =>
+    unwrap(apiClient.post(`${BASE}/master-payroll-history/${importId}/unfreeze/`, { note })),
+
+  // HR Manager: approve frozen file and send to Finance
+  hrApproveMasterPayroll: (importId, note = '') =>
+    unwrap(apiClient.post(`${BASE}/master-payroll-history/${importId}/hr-approve/`, { note })),
+
+  // Finance: open for review/modification
+  financeReviewMasterPayroll: (importId, note = '') =>
+    unwrap(apiClient.post(`${BASE}/master-payroll-history/${importId}/finance-review/`, { note })),
+
+  // Finance: confirm and send to Accounts
+  financeApproveMasterPayroll: (importId, note = '') =>
+    unwrap(apiClient.post(`${BASE}/master-payroll-history/${importId}/finance-approve/`, { note })),
+
+  // Accounts: mark salary as released
+  releaseMasterPayroll: (importId, note = '') =>
+    unwrap(apiClient.post(`${BASE}/master-payroll-history/${importId}/release/`, { note })),
+
+  // List past master payroll import sessions (paginated)
+  getMasterPayrollHistory: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/master-payroll-history/`, { params })),
+
+  // Download a previously generated master payroll by its import ID.
+  // Returns presigned S3 URL JSON or streams the Excel directly.
+  downloadMasterPayrollById: (importId) =>
+    apiClient.get(`${BASE}/master-payroll-history/${importId}/download/`, {
+      responseType: 'blob',
+    }).then(r => {
+      // If backend returned JSON (presigned URL redirect), parse it
+      if (r.headers['content-type']?.includes('application/json')) {
+        return r.data.text().then(t => JSON.parse(t))
+      }
+      return r.data   // Blob (on-the-fly Excel)
+    }),
+
+  // Super-admin approval tracker — all master payroll files with SLA status.
+  getApprovalTracker: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/approval-tracker/`, { params })),
+
+  // ── Salary Components ──────────────────────────────────────────────────────
+  getSalaryComponents: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/salary-components/`, { params })),
+
+  createSalaryComponent: (data) =>
+    unwrap(apiClient.post(`${BASE}/salary-components/`, data)),
+
+  updateSalaryComponent: (id, data) =>
+    unwrap(apiClient.patch(`${BASE}/salary-components/${id}/`, data)),
+
+  deactivateSalaryComponent: (id) =>
+    unwrap(apiClient.delete(`${BASE}/salary-components/${id}/`)),
+
+  // ── Salary Structures ──────────────────────────────────────────────────────
+  getSalaryStructures: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/salary-structures/`, { params })),
+
+  getSalaryStructure: (id) =>
+    unwrap(apiClient.get(`${BASE}/salary-structures/${id}/`)),
+
+  createSalaryStructure: (data) =>
+    unwrap(apiClient.post(`${BASE}/salary-structures/`, data)),
+
+  updateSalaryStructure: (id, data) =>
+    unwrap(apiClient.patch(`${BASE}/salary-structures/${id}/`, data)),
+
+  deactivateSalaryStructure: (id) =>
+    unwrap(apiClient.delete(`${BASE}/salary-structures/${id}/`)),
+
+  submitSalaryStructure: (id) =>
+    unwrap(apiClient.post(`${BASE}/salary-structures/${id}/submit/`)),
+
+  approveSalaryStructure: (id, data = {}) =>
+    unwrap(apiClient.post(`${BASE}/salary-structures/${id}/approve/`, data)),
+
+  rejectSalaryStructure: (id, data = {}) =>
+    unwrap(apiClient.post(`${BASE}/salary-structures/${id}/reject/`, data)),
+
+  getPendingSalaryStructures: () =>
+    unwrap(apiClient.get(`${BASE}/salary-structures/pending/`)),
+
+  getSalarySummary: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/salary-structures/summary/`, { params })),
+
+  // ── Salary History ─────────────────────────────────────────────────────────
+  getSalaryHistory: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/salary-history/`, { params })),
+
+  // ── Annual Leave Balance Summary ───────────────────────────────────────────
+  // Returns per-employee YTD balance as of end of (year, month).
+  // Response: { year, month, balances: { employee_code: {...} }, balances_by_name: { norm_name: {...} } }
+  getAnnualLeaveBalanceSummary: (year, month, params = {}) =>
+    unwrap(apiClient.get(`${BASE}/annual-leave-balance/`, { params: { year, month, ...params } })),
+
+  // ── Sync Leave Data (HR Manager upload) ────────────────────────────────────
+  // POST multipart with field "file" (xlsx). Imports + computes accruals.
+  syncLeaveData: (formData) =>
+    unwrap(apiClient.post(`${BASE}/sync-leave-data/`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })),
+
+  // ── Initialize Current Month Leave ─────────────────────────────────────────
+  // POST to initialize current month leave balance for all employees.
+  // Sets earned value to standard monthly accrual (1.83 days).
+  // Params: { year?, month?, branch?, dry_run?: boolean }
+  initializeCurrentMonthLeave: (params = {}) =>
+    unwrap(apiClient.post(`${BASE}/initialize-current-month-leave/`, params)),
+
+  // ── Leave Encashment ────────────────────────────────────────────────────────
+  // GET  status of encashment run for a given period
+  getLeaveEncashmentStatus: ({ year, month } = {}) =>
+    unwrap(apiClient.get(`${BASE}/leave-encashment/status/`, { params: { year, month } })),
+  // GET  dry-run preview (no DB writes) — per-employee days + pay estimate
+  previewLeaveEncashment: ({ year, month } = {}) =>
+    unwrap(apiClient.get(`${BASE}/leave-encashment/preview/`, { params: { year, month } })),
+  // POST trigger encashment for a given period (HR-only)
+  runLeaveEncashment: ({ year, month } = {}) =>
+    unwrap(apiClient.post(`${BASE}/leave-encashment/run/`, { year, month })),
+  // GET  list of all encashment runs
+  getLeaveEncashmentList: () =>
+    unwrap(apiClient.get(`${BASE}/leave-encashment/`)),
+
+  // ── Daily Work Log (Daily Tracker) ─────────────────────────────────────────
+  getDailyLogs:          (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/daily-logs/`,                 { params })),
+  createDailyLog:        (data)        =>
+    unwrap(apiClient.post(`${BASE}/daily-logs/`,                data)),
+  updateDailyLog:        (id, data)    =>
+    unwrap(apiClient.patch(`${BASE}/daily-logs/${id}/`,         data)),
+  deleteDailyLog:        (id)          =>
+    unwrap(apiClient.delete(`${BASE}/daily-logs/${id}/`)),
+  getDailyLogSummary:    (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/daily-logs/summary/`,         { params })),
+  exportDailyLogsToS3:   (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/daily-logs/export-to-s3/`,    { params })),
+  getTeamDailyLogs:      (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/daily-logs/team/`,            { params })),
+  // Approval workflow
+  approveDailyLog:       (id, note = '') =>
+    unwrap(apiClient.post(`${BASE}/daily-logs/${id}/approve/`,  { note })),
+  rejectDailyLog:        (id, note = '') =>
+    unwrap(apiClient.post(`${BASE}/daily-logs/${id}/reject/`,   { note })),
+  getDailyApprovalQueue: (params = {}) =>
+    unwrap(apiClient.get(`${BASE}/daily-logs/`,                 { params: { approval_status: 'pending', all: 'true', ...params } })),
+}
+
+export default payrollService

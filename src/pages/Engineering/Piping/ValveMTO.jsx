@@ -24,12 +24,13 @@ import {
   Search, AlertCircle, RefreshCw, X, Sparkles, History as HistoryIcon,
   RotateCcw, Pencil, Database, Layers, MapPin, FolderKanban, ChevronDown,
   Check, AlertTriangle, Activity, TrendingUp, Target, Zap, Award,
-  Lightbulb, ChevronRight, Info, Clock,
+  Lightbulb, ChevronRight, Info, Clock, Maximize2, Minimize2,
 } from 'lucide-react';
 import {
   STORAGE_KEY, REFRESH_EVENT, PROJECT_FIELDS, VALVE_COLUMNS, VALVE_TABS,
   DEFAULT_ROW, AREA_OPTIONS,
 } from '../../../config/valveMTO.config';
+import { deriveRemarksFromRow, mergeRemarks } from '../../../config/valveMTORemarks';
 import importValveMTOFile from '../../../config/valveMTOImporter';
 import exportValveMTOWorkbook from '../../../config/valveMTOExporter';
 import {
@@ -47,6 +48,7 @@ import {
   computeRecommendations,
 } from '../../../config/valveMTOPerformance';
 import ProcessingOverlay from './ValveMTOProcessingOverlay';
+import WrenchAiDocAssist from '../../../components/Engineering/WrenchAiDocAssist';
 import apiClient from '../../../services/api.service';
 
 // ─── Soft-coded page constants ───────────────────────────────────────────
@@ -55,6 +57,56 @@ const PAGE_TITLE       = 'Valve MTO';
 const PAGE_SUBTITLE    = 'Valve Material Take-Off · Soft-coded template alignment · Smart import & export';
 const AUTOSAVE_DEBOUNCE = 500;
 const ACCEPTED_TYPES   = '.pdf,.xls,.xlsx,.csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+// ─── Soft-coded layout offsets ───────────────────────────────────────────
+// The global app header (<Layout> + <Header>) is fixed at top-0 with z-40.
+// Its rendered height (logo 36px + p-2 wrapper 16px + nav py-4 32px ≈ 84px)
+// is slightly taller than Layout's `pt-16` (64px) spacer, which caused the
+// Back/Title row of this page to be clipped behind the blue bar.  Adjusting
+// only here keeps the fix local — no global Layout change needed.
+//   • PAGE_TOP_OFFSET     — extra top padding for the page root so the
+//                           page-local header clears the global app bar.
+//   • LOCAL_HEADER_STICKY — when false (default), header scrolls with the
+//                           page so it never overlays the stat cards / tabs
+//                           below. Flip to true for a pinned variant.
+//   • LOCAL_HEADER_TOP    — sticky pin offset (only used if STICKY = true).
+//   • LOCAL_HEADER_Z      — kept strictly below the global header (z-40).
+const PAGE_TOP_OFFSET     = 'pt-4 sm:pt-5';
+const LOCAL_HEADER_STICKY = false;
+const LOCAL_HEADER_TOP    = 'top-16';
+const LOCAL_HEADER_Z      = 'z-30';
+const LOCAL_HEADER_CLASS  = LOCAL_HEADER_STICKY
+  ? `sticky ${LOCAL_HEADER_TOP} ${LOCAL_HEADER_Z}`
+  : '';
+
+// ─── Fullscreen layout (soft-coded) ────────────────────────────
+// Mirrors the LineList / Instrument Index pattern.  All knobs in one place;
+// flip `enabled: false` to hide the toggle without touching JSX.
+const PMS_FULLSCREEN_CONFIG = {
+  enabled:             true,
+  normalMaxWidth:      '1700px',       // default ValveMTO container width
+  fullscreenMaxWidth:  '100%',
+  fullscreenPaddingX:  '1.25rem',
+  bodyLockClass:       'pms-fullscreen-lock',
+  wrapClass:           'pms-fullscreen-wrap',
+  persistKey:          'pms.valveMTO.isFullscreen.v1',
+  zIndex:              9990,
+};
+
+// ─── AI Document Assist (Wrench) — soft-coded panel config ──────────────
+// Mirrors the panel on /engineering/process/pid-verification.  All knobs are
+// optional — set `enabled: false` to remove the panel without touching JSX.
+const AI_DOC_ASSIST_CONFIG = {
+  enabled:      true,
+  title:        'AI Document Assist',
+  subtitleTag:  '(Wrench · optional)',
+  subtitle:     'Let RAD AI pick & recommend the right Valve MTO document for this project from Wrench DMS',
+  defaultHint:  'valve mto material take off',
+  hintPlaceholder: 'e.g. valve mto, gate valve, material take off',
+  topN:         5,
+  // Restrict to the file types the Valve MTO importer can actually parse.
+  acceptedExts: ['pdf', 'xls', 'xlsx', 'csv'],
+};
 
 // Backend endpoint config for PDF extraction (vision-assisted, async).
 // All timeouts are SOFT-CODED — adjust here, no other code changes needed.
@@ -137,6 +189,25 @@ const ValveMTOPage = () => {
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   // Project dialog: { mode: 'create' | 'rename' | 'delete', target?: project }
   const [projectDialog, setProjectDialog] = useState(null);
+
+  // Fullscreen mode (soft-coded — see PMS_FULLSCREEN_CONFIG)
+  const [isFullscreen, setIsFullscreen] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(PMS_FULLSCREEN_CONFIG.persistKey) || 'false'); }
+    catch (_) { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(PMS_FULLSCREEN_CONFIG.persistKey, JSON.stringify(isFullscreen)); }
+    catch (_) {}
+    if (typeof document === 'undefined') return undefined;
+    if (isFullscreen) document.body.classList.add(PMS_FULLSCREEN_CONFIG.bodyLockClass);
+    else              document.body.classList.remove(PMS_FULLSCREEN_CONFIG.bodyLockClass);
+    const onKey = (e) => { if (e.key === 'Escape' && isFullscreen) setIsFullscreen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.classList.remove(PMS_FULLSCREEN_CONFIG.bodyLockClass);
+    };
+  }, [isFullscreen]);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [overlayFilename, setOverlayFilename] = useState('');
   const [overlayStartedAt, setOverlayStartedAt] = useState(null);
@@ -232,6 +303,13 @@ const ValveMTOPage = () => {
   // ─── Import / Export ───────────────────────────────────────────────────
   const onPickFile = () => fileRef.current?.click();
 
+  // Shim used by the AI Document Assist panel to hand a File from Wrench
+  // straight into the existing import flow — no core logic changes.
+  const runImportForFile = (file) => {
+    if (!file) return;
+    onFileChange({ target: { files: [file], value: '' } });
+  };
+
   const onFileChange = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -251,6 +329,7 @@ const ValveMTOPage = () => {
       let parsed = [];
       let projectMeta = {};
       let engineLabel = 'spreadsheet';
+      let pdfSnapshot = null;
 
       if (isPdf) {
         // ── 1) Start the async extraction job ─────────────────────────────────────────────────────
@@ -330,7 +409,12 @@ const ValveMTOPage = () => {
 
           // Stream partial rows so the user sees something while waiting.
           if (Array.isArray(snapshot?.rows) && snapshot.rows.length) {
-            const liveRows = snapshot.rows.map((r) => ({ ...DEFAULT_ROW(), ...r }));
+            const liveRows = snapshot.rows.map((r) => {
+              const merged = { ...DEFAULT_ROW(), ...r };
+              const derived = deriveRemarksFromRow(merged);
+              if (derived) merged.remarks = mergeRemarks(merged.remarks, derived);
+              return merged;
+            });
             setPartialRows(liveRows);
             setState((s) => ({
               project: { ...s.project, ...(snapshot.project_meta || {}) },
@@ -344,9 +428,15 @@ const ValveMTOPage = () => {
           }
         }
 
-        parsed      = (lastSnapshot?.rows || []).map((r) => ({ ...DEFAULT_ROW(), ...r }));
+        parsed      = (lastSnapshot?.rows || []).map((r) => {
+          const merged = { ...DEFAULT_ROW(), ...r };
+          const derived = deriveRemarksFromRow(merged);
+          if (derived) merged.remarks = mergeRemarks(merged.remarks, derived);
+          return merged;
+        });
         projectMeta = lastSnapshot?.project_meta || {};
         engineLabel = lastSnapshot?.engine || 'vision';
+        pdfSnapshot = lastSnapshot;
       } else {
         // Client-side spreadsheet importer.
         const result = await importValveMTOFile(file);
@@ -355,7 +445,17 @@ const ValveMTOPage = () => {
       }
 
       if (!parsed.length) {
-        setImportMsg({ type: 'warn', text: 'No valve rows could be detected in this file.' });
+        // Surface backend warnings (e.g. OpenAI quota / API errors) when the
+        // PDF extractor returns zero rows, so the user knows WHY nothing
+        // came back instead of guessing the file is bad.
+        const backendWarnings = pdfSnapshot?.warnings || [];
+        const hint = backendWarnings.length
+          ? ` Backend reported: ${backendWarnings[0]}`
+          : '';
+        setImportMsg({
+          type: 'warn',
+          text: `No valve rows could be detected in this file.${hint}`,
+        });
       } else {
         const finalRows = parsed.map((r, i) => ({ ...r, sl_no: i + 1 }));
         const finalProject = { ...project, ...projectMeta };
@@ -557,7 +657,18 @@ const ValveMTOPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-amber-50 to-orange-50">
+    <div className={`min-h-screen bg-gradient-to-br from-slate-50 via-amber-50 to-orange-50 ${PAGE_TOP_OFFSET}${isFullscreen ? ` ${PMS_FULLSCREEN_CONFIG.wrapClass}` : ''}`}>
+      {/* Soft-coded fullscreen styles — lifts the page above app chrome */}
+      <style>{`
+        .${PMS_FULLSCREEN_CONFIG.wrapClass} {
+          position: fixed; inset: 0; z-index: ${PMS_FULLSCREEN_CONFIG.zIndex};
+          overflow-y: auto;
+          animation: pmsFsIn 0.2s ease both;
+        }
+        body.${PMS_FULLSCREEN_CONFIG.bodyLockClass} { overflow: hidden !important; }
+        @keyframes pmsFsIn { from{opacity:0;transform:scale(0.985)} to{opacity:1;transform:scale(1)} }
+      `}</style>
+
       {/* Datalists for soft-coded option lists */}
       {VALVE_COLUMNS.filter((c) => c.options).map((c) => (
         <datalist key={c.key} id={`vmto-${c.key}`}>
@@ -565,9 +676,12 @@ const ValveMTOPage = () => {
         </datalist>
       ))}
 
-      {/* ── Header ────────────────────────────────────────────────── */}
-      <div className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8 py-4">
+      {/* ── Header (offset-only by default; sticky via LOCAL_HEADER_STICKY) ── */}
+      <div className={`bg-white border-b border-slate-200 shadow-sm ${LOCAL_HEADER_CLASS}`}>
+        <div
+          className="mx-auto px-4 sm:px-6 lg:px-8 py-4"
+          style={{ maxWidth: isFullscreen ? PMS_FULLSCREEN_CONFIG.fullscreenMaxWidth : PMS_FULLSCREEN_CONFIG.normalMaxWidth }}
+        >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button
@@ -635,6 +749,19 @@ const ValveMTOPage = () => {
                   </span>
                 )}
               </button>
+              {PMS_FULLSCREEN_CONFIG.enabled && (
+                <button
+                  onClick={() => setIsFullscreen((v) => !v)}
+                  title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Expand to fullscreen'}
+                  aria-pressed={isFullscreen}
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg shadow-sm transition-colors"
+                >
+                  {isFullscreen
+                    ? <><Minimize2 className="w-4 h-4" /> Exit</>
+                    : <><Maximize2 className="w-4 h-4" /> Fullscreen</>
+                  }
+                </button>
+              )}
               <button
                 onClick={onExport}
                 className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 rounded-lg shadow-sm transition-colors"
@@ -648,7 +775,10 @@ const ValveMTOPage = () => {
         </div>
 
         {/* ── Tab Bar ─────────────────────────────────────────────── */}
-        <div className="max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8">
+        <div
+          className="mx-auto px-4 sm:px-6 lg:px-8"
+          style={{ maxWidth: isFullscreen ? PMS_FULLSCREEN_CONFIG.fullscreenMaxWidth : PMS_FULLSCREEN_CONFIG.normalMaxWidth }}
+        >
           <div className="flex gap-1 overflow-x-auto -mb-px">
             {VALVE_TABS.map((tab) => {
               const Icon = tab.icon;
@@ -673,7 +803,10 @@ const ValveMTOPage = () => {
       </div>
 
       {/* ── Content ────────────────────────────────────────────────── */}
-      <div className="max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div
+        className="mx-auto px-4 sm:px-6 lg:px-8 py-6"
+        style={{ maxWidth: isFullscreen ? PMS_FULLSCREEN_CONFIG.fullscreenMaxWidth : PMS_FULLSCREEN_CONFIG.normalMaxWidth }}
+      >
         {importMsg && (
           <div
             className={`mb-4 flex items-start gap-3 p-3 rounded-lg border text-sm ${
@@ -687,6 +820,24 @@ const ValveMTOPage = () => {
             <button onClick={() => setImportMsg(null)} className="text-xs opacity-70 hover:opacity-100">
               <X className="w-4 h-4" />
             </button>
+          </div>
+        )}
+
+        {/* ── AI Document Assist (Wrench) — soft-coded, optional ────── */}
+        {AI_DOC_ASSIST_CONFIG.enabled && (
+          <div className="mb-4">
+            <WrenchAiDocAssist
+              title={AI_DOC_ASSIST_CONFIG.title}
+              subtitleTag={AI_DOC_ASSIST_CONFIG.subtitleTag}
+              subtitle={AI_DOC_ASSIST_CONFIG.subtitle}
+              defaultHint={AI_DOC_ASSIST_CONFIG.defaultHint}
+              hintPlaceholder={AI_DOC_ASSIST_CONFIG.hintPlaceholder}
+              topN={AI_DOC_ASSIST_CONFIG.topN}
+              acceptedExts={AI_DOC_ASSIST_CONFIG.acceptedExts}
+              projectName={activeProject?.name || ''}
+              onFileSelected={(file) => runImportForFile(file)}
+              onError={(msg) => setImportMsg({ type: 'err', text: msg })}
+            />
           </div>
         )}
 

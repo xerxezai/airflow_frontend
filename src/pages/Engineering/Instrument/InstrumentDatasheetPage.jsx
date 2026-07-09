@@ -7,7 +7,10 @@ import {
   CircleStackIcon,
   ChartBarIcon,
   DocumentTextIcon,
-  WrenchScrewdriverIcon
+  WrenchScrewdriverIcon,
+  TableCellsIcon,
+  RectangleStackIcon,
+  BoltIcon
 } from '@heroicons/react/24/outline';
 
 /**
@@ -15,11 +18,71 @@ import {
  * Central hub for all instrumentation engineering data sheet functionality
  * Follows the same design pattern as Process Datasheets for consistency
  */
+// SOFT-CODED: IO List has been promoted to a first-class sub-feature under
+// 1.3 Instrument (see engineeringStructure.config.js → instrumentIoList).
+// Set this flag to true if you ever need to surface it inside the Datasheets
+// hub again — no other change required.
+const SHOW_IO_LIST_IN_DATASHEET_HUB = false;
+
 const InstrumentDatasheetPage = () => {
   const navigate = useNavigate();
 
   // Soft-coded data sheet types configuration for Instrumentation Engineering
   const dataSheetTypes = [
+    {
+      id: 'io_list',
+      name: 'IO List',
+      description: 'Generate a canonical IO list from your instrument register, or run a deterministic quality check on an existing list.',
+      icon: TableCellsIcon,
+      color: 'purple',
+      gradient: 'from-purple-600 to-indigo-600',
+      path: '/engineering/instrument/datasheet/io-list',
+      badge: 'Generator + QC',
+      disabled: false,
+      features: [
+        'Excel / CSV ingestion',
+        'Alias-tolerant headers',
+        'Duplicate tag detection',
+        'Signal type enum check',
+        'Download as XLSX'
+      ]
+    },
+    {
+      id: 'cable_block_diagram',
+      name: 'Cable Block Diagram',
+      description: 'Aggregate IO points into cable bundles per panel and signal type for the cable block diagram, or QC an existing bundle list.',
+      icon: RectangleStackIcon,
+      color: 'purple',
+      gradient: 'from-indigo-600 to-blue-600',
+      path: '/engineering/instrument/datasheet/cable-block-diagram',
+      badge: 'Generator + QC',
+      disabled: false,
+      features: [
+        'Per-panel bundling',
+        'Signal-type grouping',
+        'Auto cable type mapping',
+        'Source/destination check',
+        'Block diagram export'
+      ]
+    },
+    {
+      id: 'cable_schedule',
+      name: 'Cable Schedule',
+      description: 'Synthesise a per-cable schedule from the IO list, or validate an existing schedule for duplicates and integrity issues.',
+      icon: BoltIcon,
+      color: 'purple',
+      gradient: 'from-violet-600 to-fuchsia-600',
+      path: '/engineering/instrument/datasheet/cable-schedule',
+      badge: 'Generator + QC',
+      disabled: false,
+      features: [
+        'One row per IO point',
+        'Auto cable tag prefixing',
+        'Length / cores validation',
+        'Duplicate cable detection',
+        'Excel download'
+      ]
+    },
     {
       id: 'control_valve',
       name: 'Control Valve Sizing',
@@ -161,7 +224,7 @@ const InstrumentDatasheetPage = () => {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-              Instrument Data Sheets
+              Instrument Datasheets
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
               Comprehensive instrumentation engineering data management and specification system
@@ -178,7 +241,9 @@ const InstrumentDatasheetPage = () => {
       {/* Data Sheet Cards Grid */}
       <div className="max-w-7xl mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {dataSheetTypes.map((type) => {
+          {dataSheetTypes
+            .filter((type) => SHOW_IO_LIST_IN_DATASHEET_HUB || type.id !== 'io_list')
+            .map((type) => {
             const IconComponent = type.icon;
             const isDisabled = type.disabled || false;
 
@@ -291,7 +356,7 @@ const InstrumentDatasheetPage = () => {
             </div>
             <div className="flex-1">
               <h4 className="text-sm font-semibold text-purple-900 dark:text-purple-100 mb-1">
-                About Instrument Data Sheets
+                About Instrument Datasheets
               </h4>
               <p className="text-sm text-purple-800 dark:text-purple-200">
                 This centralized hub will provide access to all instrumentation engineering data sheet functionality. 
