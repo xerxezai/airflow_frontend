@@ -342,6 +342,19 @@ function App() {
     )
   }, [isAuthenticated, user, modulesLoaded, userModules])
 
+  // SOFT-CODED: HR routes are gated by FEATURE_FLAGS.enableHRModule, but that
+  // global flag must not override a user's actual RBAC module grants —
+  // otherwise a per-user custom role (e.g. Onboarding-only access) is
+  // silently redirected away even though the role legitimately grants it.
+  const HR_MODULE_CODES = ['hr_management', 'payroll', 'hr_onboarding']
+  const hrUserData = user?.user || user
+  const hasHRAdminAccess =
+    hrUserData?.is_staff ||
+    hrUserData?.is_superuser ||
+    user?.roles?.some((role) => role.code === 'super_admin' || role.name === 'Super Administrator')
+  const hasAnyHRModule = userModules.some((code) => HR_MODULE_CODES.includes(code))
+  const showHRRoutes = FEATURE_FLAGS.enableHRModule || hasHRAdminAccess || hasAnyHRModule
+
   // Public Route wrapper (redirect if authenticated)
   // SOFT-CODED: stable reference via useCallback prevents remount loop
   const PublicRoute = useCallback(({ children }) => {
@@ -672,8 +685,8 @@ function App() {
           }
         />
         {/* ── Human Resources Routes ─────────────────────────────────────────── */}
-        {/* SOFT-CODED: Controlled by FEATURE_FLAGS.enableHRModule in features.config.js */}
-        {FEATURE_FLAGS.enableHRModule ? (
+        {/* SOFT-CODED: gated by FEATURE_FLAGS.enableHRModule OR actual RBAC module grants (showHRRoutes) */}
+        {showHRRoutes ? (
           <>
             <Route
               path="hr"
