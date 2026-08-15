@@ -66,7 +66,7 @@ const AchievementSection = () => {
 
     setIsLoading(true);
     const path = editingId ? `/rbac/achievements/${editingId}/` : '/rbac/achievements/';
-    const { ok, message } = await profileApiRequest(path, {
+    const { ok, message, data } = await profileApiRequest(path, {
       method: editingId ? 'PATCH' : 'POST',
       body: {
         ...formData,
@@ -78,7 +78,28 @@ const AchievementSection = () => {
 
     if (!ok) {
       console.error('[Achievement] save failed:', message);
-      toast.error(message);
+      console.error('[Achievement] error data:', data);
+      
+      // Enhanced error messages
+      let displayMessage = message;
+      
+      // Check for profile-related errors
+      if (data && data.user_profile) {
+        displayMessage = 'Profile setup required. Please refresh the page and try again. If this persists, contact support.';
+      } 
+      // Check for validation errors
+      else if (data && data.title) {
+        displayMessage = `Title error: ${data.title}`;
+      } 
+      else if (data && data.category) {
+        displayMessage = `Category error: ${data.category}`;
+      }
+      // Generic "This field is required" - be more helpful
+      else if (message === 'This field is required.' || message.includes('required')) {
+        displayMessage = 'Some required information is missing. Please check all fields and try again. If this persists, try logging out and back in.';
+      }
+      
+      toast.error(displayMessage);
       return;
     }
 
