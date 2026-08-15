@@ -106,17 +106,33 @@ const AchievementSection = () => {
       });
 
       if (!res.ok) {
-        // ✅ SOFT-CODED: Enhanced error handling with detailed logging
-        const error = await res.json().catch(() => ({}));
-        console.error('Achievement save error:', {
+        // ✅ SOFT-CODED: Enhanced error handling with comprehensive logging
+        let error = {};
+        let responseText = '';
+        
+        try {
+          responseText = await res.text();
+          console.log('[Achievement] Raw response:', responseText);
+          
+          if (responseText) {
+            error = JSON.parse(responseText);
+          }
+        } catch (parseErr) {
+          console.error('[Achievement] Failed to parse error response:', parseErr);
+          error = { detail: responseText || 'Unknown error occurred' };
+        }
+        
+        console.error('[Achievement] Complete error details:', {
           status: res.status,
           statusText: res.statusText,
+          url: res.url,
           error: error,
+          responseText: responseText,
           formData: formData
         });
         
         // Extract specific field errors if available
-        let errorMessage = error.detail || error.error || 'Failed to save achievement';
+        let errorMessage = error.detail || error.error || `Server error (${res.status})`;
         
         // Check for field-specific errors
         if (error.user_profile) {
@@ -125,14 +141,20 @@ const AchievementSection = () => {
           errorMessage = `Title error: ${Array.isArray(error.title) ? error.title[0] : error.title}`;
         } else if (error.category) {
           errorMessage = `Category error: ${Array.isArray(error.category) ? error.category[0] : error.category}`;
+        } else if (error.organization) {
+          errorMessage = `Organization error: ${Array.isArray(error.organization) ? error.organization[0] : error.organization}`;
         } else {
           // Check for any other field errors
-          const fieldError = Object.entries(error)
+          const fieldErrors = Object.entries(error)
             .filter(([key]) => !['detail', 'error'].includes(key))
-            .map(([key, value]) => `${key}: ${Array.isArray(value) ? value[0] : value}`)
-            .find(msg => msg);
-          if (fieldError) {
-            errorMessage = fieldError;
+            .map(([key, value]) => {
+              const errorValue = Array.isArray(value) ? value[0] : value;
+              return typeof errorValue === 'string' ? `${key}: ${errorValue}` : null;
+            })
+            .filter(msg => msg);
+          
+          if (fieldErrors.length > 0) {
+            errorMessage = fieldErrors.join(', ');
           }
         }
         
@@ -143,7 +165,8 @@ const AchievementSection = () => {
       await fetchAchievements();
       resetForm();
     } catch (err) {
-      toast.error(err.message);
+      console.error('[Achievement] Catch block error:', err);
+      toast.error(err.message || 'Failed to save achievement');
     } finally {
       setIsLoading(false);
     }
