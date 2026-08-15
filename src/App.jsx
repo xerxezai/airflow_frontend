@@ -4,6 +4,7 @@ import { useSelector } from 'react-redux'
 import { useState, useEffect, useCallback } from 'react'
 import { API_BASE_URL, API_ENDPOINTS } from './config/api.config'
 import { FEATURE_FLAGS, ENV } from './config/features.config'
+import { ROUTES } from './config/routes.config'
 import passwordExpiryService from './services/passwordExpiry.service'
 import Layout from './components/Layout/Layout'
 import FirstLoginCheck from './components/Auth/FirstLoginCheck'
@@ -526,7 +527,7 @@ function App() {
           }
         />
         
-        {/* SOFT-CODED: /pid/upload disabled — replaced by /engineering/process/pid-verification */}
+        {/* SOFT-CODED: /pid/upload disabled — replaced by P&ID Verification V1 */}
         {/* <Route
           path="pid/upload"
           element={
@@ -535,8 +536,8 @@ function App() {
             </ModuleProtectedRoute>
           }
         /> */}
-        {/* Redirect old /pid/upload path to new location */}
-        <Route path="pid/upload" element={<Navigate to="/engineering/process/pid-verification" replace />} />
+        {/* Redirect old /pid/upload path to new location (soft-coded) */}
+        <Route path="pid/upload" element={<Navigate to={ROUTES.PID_VERIFICATION} replace />} />
         <Route
           path="pid/report/:id"
           element={
@@ -918,17 +919,7 @@ function App() {
         />
 
 
-        {/* P&ID Verification - Default is now V2 */}
-        <Route
-          path="engineering/process/pid-verification"
-          element={
-            <ModuleProtectedRoute moduleCode="pid_analysis">
-              <PIDVerificationV2 />
-            </ModuleProtectedRoute>
-          }
-        />
-
-        {/* P&ID Verification V1 (Legacy) */}
+        {/* P&ID Verification V1 - Primary Route (SOFT-CODED) */}
         <Route
           path="engineering/process/pid-verification-v1"
           element={
@@ -938,9 +929,15 @@ function App() {
           }
         />
 
-        {/* P&ID Verification — Comparison Report */}
+        {/* Redirect old pid-verification to V1 (soft-coded) */}
+        <Route 
+          path="engineering/process/pid-verification" 
+          element={<Navigate to={ROUTES.PID_VERIFICATION} replace />} 
+        />
+
+        {/* P&ID Verification V1 — Report */}
         <Route
-          path="engineering/process/pid-verification/report/:documentId"
+          path="engineering/process/pid-verification-v1/report/:documentId"
           element={
             <ModuleProtectedRoute moduleCode="pid_analysis">
               <PIDVerificationV2Report />
