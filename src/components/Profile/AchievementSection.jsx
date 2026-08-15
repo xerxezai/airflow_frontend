@@ -68,7 +68,11 @@ const AchievementSection = () => {
     const path = editingId ? `/rbac/achievements/${editingId}/` : '/rbac/achievements/';
     const { ok, message } = await profileApiRequest(path, {
       method: editingId ? 'PATCH' : 'POST',
-      body: formData,
+      body: {
+        ...formData,
+        // Empty date input submits '' — the API only accepts a real date or null.
+        achieved_date: formData.achieved_date || null,
+      },
     });
     setIsLoading(false);
 
