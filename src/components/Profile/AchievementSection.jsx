@@ -106,11 +106,37 @@ const AchievementSection = () => {
       });
 
       if (!res.ok) {
+        // ✅ SOFT-CODED: Enhanced error handling with detailed logging
         const error = await res.json().catch(() => ({}));
-        const fieldError = Object.values(error)
-          .flat()
-          .find(value => typeof value === 'string' && value.trim());
-        throw new Error(error.detail || error.error || fieldError || 'Failed to save achievement');
+        console.error('Achievement save error:', {
+          status: res.status,
+          statusText: res.statusText,
+          error: error,
+          formData: formData
+        });
+        
+        // Extract specific field errors if available
+        let errorMessage = error.detail || error.error || 'Failed to save achievement';
+        
+        // Check for field-specific errors
+        if (error.user_profile) {
+          errorMessage = `Profile error: ${Array.isArray(error.user_profile) ? error.user_profile[0] : error.user_profile}`;
+        } else if (error.title) {
+          errorMessage = `Title error: ${Array.isArray(error.title) ? error.title[0] : error.title}`;
+        } else if (error.category) {
+          errorMessage = `Category error: ${Array.isArray(error.category) ? error.category[0] : error.category}`;
+        } else {
+          // Check for any other field errors
+          const fieldError = Object.entries(error)
+            .filter(([key]) => !['detail', 'error'].includes(key))
+            .map(([key, value]) => `${key}: ${Array.isArray(value) ? value[0] : value}`)
+            .find(msg => msg);
+          if (fieldError) {
+            errorMessage = fieldError;
+          }
+        }
+        
+        throw new Error(errorMessage);
       }
 
       toast.success(editingId ? 'Achievement updated!' : 'Achievement added!');
