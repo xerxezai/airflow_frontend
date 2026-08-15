@@ -198,13 +198,28 @@ const DocumentUploadSection = () => {
         // Extract specific field errors if available
         let errorMessage = error.detail || error.error || 'Upload failed';
         
-        // Check for field-specific errors
+        // Check for field-specific errors and provide user-friendly messages
         if (error.user_profile) {
           errorMessage = `Profile error: ${Array.isArray(error.user_profile) ? error.user_profile[0] : error.user_profile}`;
         } else if (error.document_file) {
-          errorMessage = `File error: ${Array.isArray(error.document_file) ? error.document_file[0] : error.document_file}`;
+          const fileError = Array.isArray(error.document_file) ? error.document_file[0] : error.document_file;
+          // Check if it's a file size or format error
+          if (fileError.includes('size') || fileError.includes('MB')) {
+            errorMessage = `File too large: ${fileError}`;
+          } else if (fileError.includes('format') || fileError.includes('Invalid')) {
+            errorMessage = `Invalid file format: ${fileError}`;
+          } else {
+            errorMessage = `File error: ${fileError}`;
+          }
         } else if (error.document_type) {
-          errorMessage = `Type error: ${Array.isArray(error.document_type) ? error.document_type[0] : error.document_type}`;
+          errorMessage = `Document type error: ${Array.isArray(error.document_type) ? error.document_type[0] : error.document_type}`;
+        } else if (error.non_field_errors) {
+          errorMessage = Array.isArray(error.non_field_errors) ? error.non_field_errors[0] : error.non_field_errors;
+        }
+        
+        // Check for AWS S3 errors
+        if (errorMessage.includes('S3') || errorMessage.includes('storage') || errorMessage.includes('bucket')) {
+          errorMessage = 'Storage system error. Please try again or contact support if the issue persists.';
         }
         
         console.error('Document upload error:', error);
