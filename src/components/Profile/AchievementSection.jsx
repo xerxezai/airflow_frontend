@@ -4,7 +4,7 @@ import {
   Trophy, Award, Medal, Sparkles, Plus, X, Edit2, Check,
   ExternalLink, Calendar, MapPin, Building2, Star, Trash2
 } from 'lucide-react';
-import { API_BASE_URL } from '../../config/api.config';
+import { profileApiRequest } from '../../utils/profileSectionApi';
 
 /**
  * Achievement Section — Sports, Academics, Professional, Genius Records
@@ -39,137 +39,48 @@ const AchievementSection = () => {
   }, []);
 
   const fetchAchievements = async () => {
-    try {
-      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
-      const res = await fetch(`${API_BASE_URL}/rbac/achievements/?mine=true`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to fetch achievements');
-      const data = await res.json();
-      setAchievements(Array.isArray(data) ? data : data.results || []);
-    } catch (err) {
-      console.error(err);
+    const { ok, data, message } = await profileApiRequest('/rbac/achievements/?mine=true');
+    if (!ok) {
+      console.error('[Achievement] fetch list failed:', message);
+      return;
     }
+    setAchievements(Array.isArray(data) ? data : data?.results || []);
   };
 
   const fetchCategories = async () => {
-    try {
-      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
-      const res = await fetch(`${API_BASE_URL}/rbac/achievements/categories/`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setCategories(data);
-      }
-    } catch (err) {
-      console.error(err);
-    }
+    const { ok, data } = await profileApiRequest('/rbac/achievements/categories/');
+    if (ok) setCategories(data || []);
   };
 
   const fetchLevels = async () => {
-    try {
-      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
-      const res = await fetch(`${API_BASE_URL}/rbac/achievements/levels/`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setLevels(data);
-      }
-    } catch (err) {
-      console.error(err);
-    }
+    const { ok, data } = await profileApiRequest('/rbac/achievements/levels/');
+    if (ok) setLevels(data || []);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.title || !formData.category) {
+    if (!formData.title.trim() || !formData.category) {
       toast.error('Title and category are required');
       return;
     }
 
     setIsLoading(true);
-    try {
-      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
-      const url = editingId
-        ? `${API_BASE_URL}/rbac/achievements/${editingId}/`
-        : `${API_BASE_URL}/rbac/achievements/`;
-      
-      const res = await fetch(url, {
-        method: editingId ? 'PATCH' : 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
-      });
+    const path = editingId ? `/rbac/achievements/${editingId}/` : '/rbac/achievements/';
+    const { ok, message } = await profileApiRequest(path, {
+      method: editingId ? 'PATCH' : 'POST',
+      body: formData,
+    });
+    setIsLoading(false);
 
-      if (!res.ok) {
-        // ✅ SOFT-CODED: Enhanced error handling with comprehensive logging
-        let error = {};
-        let responseText = '';
-        
-        try {
-          responseText = await res.text();
-          console.log('[Achievement] Raw response:', responseText);
-          
-          if (responseText) {
-            error = JSON.parse(responseText);
-          }
-        } catch (parseErr) {
-          console.error('[Achievement] Failed to parse error response:', parseErr);
-          error = { detail: responseText || 'Unknown error occurred' };
-        }
-        
-        console.error('[Achievement] Complete error details:', {
-          status: res.status,
-          statusText: res.statusText,
-          url: res.url,
-          error: error,
-          responseText: responseText,
-          formData: formData
-        });
-        
-        // Extract specific field errors if available
-        let errorMessage = error.detail || error.error || `Server error (${res.status})`;
-        
-        // Check for field-specific errors
-        if (error.user_profile) {
-          errorMessage = `Profile error: ${Array.isArray(error.user_profile) ? error.user_profile[0] : error.user_profile}`;
-        } else if (error.title) {
-          errorMessage = `Title error: ${Array.isArray(error.title) ? error.title[0] : error.title}`;
-        } else if (error.category) {
-          errorMessage = `Category error: ${Array.isArray(error.category) ? error.category[0] : error.category}`;
-        } else if (error.organization) {
-          errorMessage = `Organization error: ${Array.isArray(error.organization) ? error.organization[0] : error.organization}`;
-        } else {
-          // Check for any other field errors
-          const fieldErrors = Object.entries(error)
-            .filter(([key]) => !['detail', 'error'].includes(key))
-            .map(([key, value]) => {
-              const errorValue = Array.isArray(value) ? value[0] : value;
-              return typeof errorValue === 'string' ? `${key}: ${errorValue}` : null;
-            })
-            .filter(msg => msg);
-          
-          if (fieldErrors.length > 0) {
-            errorMessage = fieldErrors.join(', ');
-          }
-        }
-        
-        throw new Error(errorMessage);
-      }
-
-      toast.success(editingId ? 'Achievement updated!' : 'Achievement added!');
-      await fetchAchievements();
-      resetForm();
-    } catch (err) {
-      console.error('[Achievement] Catch block error:', err);
-      toast.error(err.message || 'Failed to save achievement');
-    } finally {
-      setIsLoading(false);
+    if (!ok) {
+      console.error('[Achievement] save failed:', message);
+      toast.error(message);
+      return;
     }
+
+    toast.success(editingId ? 'Achievement updated!' : 'Achievement added!');
+    await fetchAchievements();
+    resetForm();
   };
 
   const handleEdit = (achievement) => {
@@ -191,23 +102,17 @@ const AchievementSection = () => {
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this achievement?')) return;
-    
-    setIsLoading(true);
-    try {
-      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
-      const res = await fetch(`${API_BASE_URL}/rbac/achievements/${id}/`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
 
-      if (!res.ok) throw new Error('Failed to delete');
-      toast.success('Achievement deleted');
-      await fetchAchievements();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setIsLoading(false);
+    setIsLoading(true);
+    const { ok, message } = await profileApiRequest(`/rbac/achievements/${id}/`, { method: 'DELETE' });
+    setIsLoading(false);
+
+    if (!ok) {
+      toast.error(message);
+      return;
     }
+    toast.success('Achievement deleted');
+    await fetchAchievements();
   };
 
   const resetForm = () => {
