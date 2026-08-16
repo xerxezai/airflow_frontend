@@ -4,7 +4,7 @@ import {
   Briefcase, Plus, X, Edit2, Trash2, Calendar, MapPin, Building2,
   Check, ExternalLink, Clock, TrendingUp,
 } from 'lucide-react';
-import { profileApiRequest } from '../../utils/profileSectionApi';
+import { API_BASE_URL } from '../../config/api.config';
 
 /**
  * Work Experience Timeline Section
@@ -44,53 +44,93 @@ const WorkExperienceSection = () => {
   }, []);
 
   const fetchExperiences = async () => {
-    const { ok, data, message } = await profileApiRequest('/rbac/work-experience/?mine=true');
-    if (!ok) {
-      console.error('[Experience] fetch list failed:', message);
-      return;
+    try {
+      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
+      const res = await fetch(`${API_BASE_URL}/rbac/work-experience/?mine=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to fetch experience');
+      const data = await res.json();
+      setExperiences(Array.isArray(data) ? data : data.results || []);
+    } catch (err) {
+      console.error(err);
     }
-    setExperiences(Array.isArray(data) ? data : data?.results || []);
   };
 
   const fetchEmploymentTypes = async () => {
-    const { ok, data } = await profileApiRequest('/rbac/work-experience/employment_types/');
-    if (ok) setEmploymentTypes(data || []);
+    try {
+      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
+      const res = await fetch(`${API_BASE_URL}/rbac/work-experience/employment_types/`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEmploymentTypes(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const fetchIndustries = async () => {
-    const { ok, data } = await profileApiRequest('/rbac/work-experience/industries/');
-    if (ok) setIndustries(data || []);
+    try {
+      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
+      const res = await fetch(`${API_BASE_URL}/rbac/work-experience/industries/`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIndustries(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.company_name.trim() || !formData.job_title.trim() || !formData.start_date) {
+    if (!formData.company_name || !formData.job_title || !formData.start_date) {
       toast.error('Company name, job title, and start date are required');
       return;
     }
 
     setIsLoading(true);
-    const path = editingId ? `/rbac/work-experience/${editingId}/` : '/rbac/work-experience/';
-    const { ok, message } = await profileApiRequest(path, {
-      method: editingId ? 'PATCH' : 'POST',
-      body: {
-        ...formData,
-        // Optional date inputs use an empty string in React, while the API
-        // expects a real ISO date or null.
-        end_date: formData.end_date || null,
-      },
-    });
-    setIsLoading(false);
+    try {
+      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
+      const url = editingId
+        ? `${API_BASE_URL}/rbac/work-experience/${editingId}/`
+        : `${API_BASE_URL}/rbac/work-experience/`;
+      
+      const res = await fetch(url, {
+        method: editingId ? 'PATCH' : 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...formData,
+          // Optional date inputs use an empty string in React, while the API
+          // expects a real ISO date or null.
+          end_date: formData.end_date || null,
+        }),
+      });
 
-    if (!ok) {
-      console.error('[Experience] save failed:', message);
-      toast.error(message);
-      return;
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        const fieldError = Object.values(error)
+          .flat()
+          .find(value => typeof value === 'string' && value.trim());
+        throw new Error(error.detail || error.error || fieldError || 'Failed to save experience');
+      }
+
+      toast.success(editingId ? 'Experience updated!' : 'Experience added!');
+      await fetchExperiences();
+      resetForm();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setIsLoading(false);
     }
-
-    toast.success(editingId ? 'Experience updated!' : 'Experience added!');
-    await fetchExperiences();
-    resetForm();
   };
 
   const handleEdit = (experience) => {
@@ -115,17 +155,23 @@ const WorkExperienceSection = () => {
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this experience entry?')) return;
-
+    
     setIsLoading(true);
-    const { ok, message } = await profileApiRequest(`/rbac/work-experience/${id}/`, { method: 'DELETE' });
-    setIsLoading(false);
+    try {
+      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
+      const res = await fetch(`${API_BASE_URL}/rbac/work-experience/${id}/`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
-    if (!ok) {
-      toast.error(message);
-      return;
+      if (!res.ok) throw new Error('Failed to delete');
+      toast.success('Experience deleted');
+      await fetchExperiences();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setIsLoading(false);
     }
-    toast.success('Experience deleted');
-    await fetchExperiences();
   };
 
   const resetForm = () => {
