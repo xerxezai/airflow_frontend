@@ -4,7 +4,7 @@ import {
   Trophy, Award, Medal, Sparkles, Plus, X, Edit2, Check,
   ExternalLink, Calendar, MapPin, Building2, Star, Trash2
 } from 'lucide-react';
-import { profileApiRequest } from '../../utils/profileSectionApi';
+import { API_BASE_URL } from '../../config/api.config';
 
 /**
  * Achievement Section — Sports, Academics, Professional, Genius Records
@@ -39,73 +39,88 @@ const AchievementSection = () => {
   }, []);
 
   const fetchAchievements = async () => {
-    const { ok, data, message } = await profileApiRequest('/rbac/achievements/?mine=true');
-    if (!ok) {
-      console.error('[Achievement] fetch list failed:', message);
-      return;
+    try {
+      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
+      const res = await fetch(`${API_BASE_URL}/rbac/achievements/?mine=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to fetch achievements');
+      const data = await res.json();
+      setAchievements(Array.isArray(data) ? data : data.results || []);
+    } catch (err) {
+      console.error(err);
     }
-    setAchievements(Array.isArray(data) ? data : data?.results || []);
   };
 
   const fetchCategories = async () => {
-    const { ok, data } = await profileApiRequest('/rbac/achievements/categories/');
-    if (ok) setCategories(data || []);
+    try {
+      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
+      const res = await fetch(`${API_BASE_URL}/rbac/achievements/categories/`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCategories(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const fetchLevels = async () => {
-    const { ok, data } = await profileApiRequest('/rbac/achievements/levels/');
-    if (ok) setLevels(data || []);
+    try {
+      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
+      const res = await fetch(`${API_BASE_URL}/rbac/achievements/levels/`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLevels(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.title.trim() || !formData.category) {
+    if (!formData.title || !formData.category) {
       toast.error('Title and category are required');
       return;
     }
 
     setIsLoading(true);
-    const path = editingId ? `/rbac/achievements/${editingId}/` : '/rbac/achievements/';
-    const { ok, message, data } = await profileApiRequest(path, {
-      method: editingId ? 'PATCH' : 'POST',
-      body: {
-        ...formData,
-        // Empty date input submits '' — the API only accepts a real date or null.
-        achieved_date: formData.achieved_date || null,
-      },
-    });
-    setIsLoading(false);
+    try {
+      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
+      const url = editingId
+        ? `${API_BASE_URL}/rbac/achievements/${editingId}/`
+        : `${API_BASE_URL}/rbac/achievements/`;
+      
+      const res = await fetch(url, {
+        method: editingId ? 'PATCH' : 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      });
 
-    if (!ok) {
-      console.error('[Achievement] save failed:', message);
-      console.error('[Achievement] error data:', data);
-      
-      // Enhanced error messages
-      let displayMessage = message;
-      
-      // Check for profile-related errors
-      if (data && data.user_profile) {
-        displayMessage = 'Profile setup required. Please refresh the page and try again. If this persists, contact support.';
-      } 
-      // Check for validation errors
-      else if (data && data.title) {
-        displayMessage = `Title error: ${data.title}`;
-      } 
-      else if (data && data.category) {
-        displayMessage = `Category error: ${data.category}`;
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        const fieldError = Object.values(error)
+          .flat()
+          .find(value => typeof value === 'string' && value.trim());
+        throw new Error(error.detail || error.error || fieldError || 'Failed to save achievement');
       }
-      // Generic "This field is required" - be more helpful
-      else if (message === 'This field is required.' || message.includes('required')) {
-        displayMessage = 'Some required information is missing. Please check all fields and try again. If this persists, try logging out and back in.';
-      }
-      
-      toast.error(displayMessage);
-      return;
+
+      toast.success(editingId ? 'Achievement updated!' : 'Achievement added!');
+      await fetchAchievements();
+      resetForm();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setIsLoading(false);
     }
-
-    toast.success(editingId ? 'Achievement updated!' : 'Achievement added!');
-    await fetchAchievements();
-    resetForm();
   };
 
   const handleEdit = (achievement) => {
@@ -127,17 +142,23 @@ const AchievementSection = () => {
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this achievement?')) return;
-
+    
     setIsLoading(true);
-    const { ok, message } = await profileApiRequest(`/rbac/achievements/${id}/`, { method: 'DELETE' });
-    setIsLoading(false);
+    try {
+      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
+      const res = await fetch(`${API_BASE_URL}/rbac/achievements/${id}/`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
-    if (!ok) {
-      toast.error(message);
-      return;
+      if (!res.ok) throw new Error('Failed to delete');
+      toast.success('Achievement deleted');
+      await fetchAchievements();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setIsLoading(false);
     }
-    toast.success('Achievement deleted');
-    await fetchAchievements();
   };
 
   const resetForm = () => {
