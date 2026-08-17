@@ -63,5 +63,4 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       </QueryClientProvider>
     </Provider>
   </React.StrictMode>,
-)
-/
+)
