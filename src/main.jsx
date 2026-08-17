@@ -42,6 +42,9 @@ const queryClient = new QueryClient({
   },
 })
 
+const _v = '2.0.1'
+console.log('v', _v)
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <Provider store={store}>
@@ -63,4 +66,4 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       </QueryClientProvider>
     </Provider>
   </React.StrictMode>,
-)
+)
