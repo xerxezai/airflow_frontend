@@ -4519,6 +4519,9 @@ export function InitiateExitModal({ onClose, onSuccess, initialEmployeeId = null
         target_completion_date: formData.target_completion_date || formData.last_working_day,
         assigned_to: formData.assigned_to || null,
         notes: formData.notes || '',
+        hr_coordinator: formData.hr_coordinator || null,
+        hr_approver: formData.hr_approver || null,
+        project_assignments: formData.project_assignments || [],
         status: 'initiated',
         progress_percentage: 0,
       }
