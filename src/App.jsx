@@ -4,7 +4,6 @@ import { useSelector } from 'react-redux'
 import { useState, useEffect, useCallback } from 'react'
 import { API_BASE_URL, API_ENDPOINTS } from './config/api.config'
 import { FEATURE_FLAGS, ENV } from './config/features.config'
-import { ROUTES } from './config/routes.config'
 import passwordExpiryService from './services/passwordExpiry.service'
 import Layout from './components/Layout/Layout'
 import FirstLoginCheck from './components/Auth/FirstLoginCheck'
@@ -343,19 +342,6 @@ function App() {
     )
   }, [isAuthenticated, user, modulesLoaded, userModules])
 
-  // SOFT-CODED: HR routes are gated by FEATURE_FLAGS.enableHRModule, but that
-  // global flag must not override a user's actual RBAC module grants —
-  // otherwise a per-user custom role (e.g. Onboarding-only access) is
-  // silently redirected away even though the role legitimately grants it.
-  const HR_MODULE_CODES = ['hr_management', 'payroll', 'hr_onboarding']
-  const hrUserData = user?.user || user
-  const hasHRAdminAccess =
-    hrUserData?.is_staff ||
-    hrUserData?.is_superuser ||
-    user?.roles?.some((role) => role.code === 'super_admin' || role.name === 'Super Administrator')
-  const hasAnyHRModule = userModules.some((code) => HR_MODULE_CODES.includes(code))
-  const showHRRoutes = FEATURE_FLAGS.enableHRModule || hasHRAdminAccess || hasAnyHRModule
-
   // Public Route wrapper (redirect if authenticated)
   // SOFT-CODED: stable reference via useCallback prevents remount loop
   const PublicRoute = useCallback(({ children }) => {
@@ -527,7 +513,7 @@ function App() {
           }
         />
         
-        {/* SOFT-CODED: /pid/upload disabled — replaced by P&ID Verification V1 */}
+        {/* SOFT-CODED: /pid/upload disabled — replaced by /engineering/process/pid-verification */}
         {/* <Route
           path="pid/upload"
           element={
@@ -536,8 +522,8 @@ function App() {
             </ModuleProtectedRoute>
           }
         /> */}
-        {/* Redirect old /pid/upload path to new location (soft-coded) */}
-        <Route path="pid/upload" element={<Navigate to={ROUTES.PID_VERIFICATION} replace />} />
+        {/* Redirect old /pid/upload path to new location */}
+        <Route path="pid/upload" element={<Navigate to="/engineering/process/pid-verification" replace />} />
         <Route
           path="pid/report/:id"
           element={
@@ -686,8 +672,8 @@ function App() {
           }
         />
         {/* ── Human Resources Routes ─────────────────────────────────────────── */}
-        {/* SOFT-CODED: gated by FEATURE_FLAGS.enableHRModule OR actual RBAC module grants (showHRRoutes) */}
-        {showHRRoutes ? (
+        {/* SOFT-CODED: Controlled by FEATURE_FLAGS.enableHRModule in features.config.js */}
+        {FEATURE_FLAGS.enableHRModule ? (
           <>
             <Route
               path="hr"
@@ -792,6 +778,14 @@ function App() {
         />
         <Route
           path="procurement/requisitions"
+          element={
+            <ModuleProtectedRoute moduleCode="procurement_requisitions">
+              <OrderManagement />
+            </ModuleProtectedRoute>
+          }
+        />
+        <Route
+          path="procurement/requisitions/:id"
           element={
             <ModuleProtectedRoute moduleCode="procurement_requisitions">
               <OrderManagement />
@@ -919,7 +913,17 @@ function App() {
         />
 
 
-        {/* P&ID Verification V1 - Primary Route (SOFT-CODED) */}
+        {/* P&ID Verification - Default is now V2 */}
+        <Route
+          path="engineering/process/pid-verification"
+          element={
+            <ModuleProtectedRoute moduleCode="pid_analysis">
+              <PIDVerificationV2 />
+            </ModuleProtectedRoute>
+          }
+        />
+
+        {/* P&ID Verification V1 (Legacy) */}
         <Route
           path="engineering/process/pid-verification-v1"
           element={
@@ -929,15 +933,9 @@ function App() {
           }
         />
 
-        {/* Redirect old pid-verification to V1 (soft-coded) */}
-        <Route 
-          path="engineering/process/pid-verification" 
-          element={<Navigate to={ROUTES.PID_VERIFICATION} replace />} 
-        />
-
-        {/* P&ID Verification V1 — Report */}
+        {/* P&ID Verification — Comparison Report */}
         <Route
-          path="engineering/process/pid-verification-v1/report/:documentId"
+          path="engineering/process/pid-verification/report/:documentId"
           element={
             <ModuleProtectedRoute moduleCode="pid_analysis">
               <PIDVerificationV2Report />
@@ -1481,4 +1479,3 @@ export default App
 
 
 
-
