@@ -25,6 +25,9 @@ const AUTH_RESILIENCE_CONFIG = {
     '/rbac/ai-champion/champion/current/',
     '/admin/',
     '/rbac/users/me/',
+    '/rbac/analytics/',
+    '/rbac/dashboard/',
+    '/wrench/sync/',
   ],
   // Endpoint URL substrings that should NOT trigger toast on timeout / network errors.
   // Polling endpoints especially must fail silently — otherwise a single slow worker
@@ -388,8 +391,10 @@ apiClient.interceptors.response.use(
         }
       }
 
+      if (error.response?.status === 403) return Promise.reject(error);
+
       let errorMessage = 'An error occurred';
-      
+
       if (!error.response) {
         // Network/CORS error
         errorMessage = 'Network error. Please check your connection or try again later.';
