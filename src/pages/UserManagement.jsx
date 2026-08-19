@@ -674,7 +674,7 @@ const UserManagement = ({ pageControls }) => {
   // ========== COMPUTED: ADMIN ACCESS CHECK ==========
   const hasAdminAccess = useMemo(() => {
     const hasRBACRole = currentUser?.roles?.some(
-      role => ['super_admin', 'admin'].includes(role.code)
+      role => ['super_admin', 'admin', 'hr_admin'].includes(role.code)
     );
     // Smart admin check using utility function
     const isDjangoAdmin = isUserAdmin(authUser);
