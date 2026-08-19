@@ -18,6 +18,7 @@ const AUTH_RESILIENCE_CONFIG = {
   // These are background/polling endpoints — failing silently keeps the UI clean.
   SILENT_AUTH_ENDPOINTS: [
     '/notifications/unread_count',
+    '/notifications/',
     '/notifications/stats',
     '/notifications/categories',
     '/usage_tracking/',
@@ -36,6 +37,7 @@ const AUTH_RESILIENCE_CONFIG = {
   // CRITICAL: /timesheet/live/ is NOT in this list — errors should surface to user
   SILENT_TIMEOUT_ENDPOINTS: [
     '/notifications/unread_count',
+    '/notifications/',
     '/notifications/stats',
     '/notifications/categories',
     '/usage_tracking/',
@@ -231,6 +233,9 @@ apiClient.interceptors.response.use(
     return response
   },
   async (error) => {
+    if (error.code === 'ERR_CANCELED' || axios.isCancel(error)) {
+      return Promise.reject(error)
+    }
     const originalRequest = error.config
     // silentTimeout: per-request opt-in (not URL-wide) — lets one caller of a
     // shared endpoint suppress the toast while another caller of that same

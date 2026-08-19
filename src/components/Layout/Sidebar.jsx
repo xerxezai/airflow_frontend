@@ -137,6 +137,14 @@ const Sidebar = ({
   const hasAdminModule = userModules.some((code) =>
     ADMIN_MODULE_CODES.includes(code),
   );
+  // SOFT-CODED: Any role that grants a real HR module code unlocks the
+  // "4. Human Resource" section even when FEATURE_FLAGS.enableHRModule is
+  // globally off — otherwise per-user custom roles (e.g. Onboarding-only
+  // access) are silently hidden despite having the module granted via RBAC.
+  const HR_MODULE_CODES = ["hr_management", "payroll", "hr_onboarding"];
+  const hasAnyHRModule = userModules.some((code) =>
+    HR_MODULE_CODES.includes(code),
+  );
 
   // isAdmin: MODULE-BASED access control (soft-coded)
   // Does NOT use is_staff flag - only is_superuser, super_admin/admin/ict_admin role, or admin modules
@@ -420,9 +428,12 @@ const Sidebar = ({
         },
       ],
     },
-    // ΓöÇΓöÇ Section 4: Human Resource ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    // ── Section 4: Human Resource ──────────────────────────────────────────
     // SOFT-CODED: Controlled by FEATURE_FLAGS.enableHRModule in features.config.js
-    // SECURITY: Super administrators ALWAYS see HR, bypassing feature flag
+    // SECURITY: Super administrators ALWAYS see HR, bypassing feature flag.
+    // Also unlocked for any role that grants an actual HR module (RBAC-based),
+    // so per-user custom roles (e.g. Onboarding-only) work even when the
+    // global feature flag is off.
     {
       id: "human_resource",
       title: getSectionTitle("human_resource"),
@@ -430,7 +441,10 @@ const Sidebar = ({
       type: "section",
       expanded: expandedSections.human_resource,
       enabled:
-        FEATURE_FLAGS.enableHRModule || hasSuperAdminRole || hasSuperuserFlag, // ΓÜá∩╕Å Super admin bypass
+        FEATURE_FLAGS.enableHRModule ||
+        hasSuperAdminRole ||
+        hasSuperuserFlag ||
+        hasAnyHRModule,
       children: [
         {
           id: "hrDashboard",
@@ -794,13 +808,13 @@ const Sidebar = ({
         //   path: '/admin/subscriptions',
         //   description: 'Plans & billing management'
         // }
-      ]
-        .filter(child =>
+      ].filter(
+        (child) =>
           !child.moduleCode ||
           hasSuperAdminRole ||
           hasSuperuserFlag ||
-          userModules.includes(child.moduleCode)
-        ),
+          userModules.includes(child.moduleCode),
+      ),
     });
   }
 
@@ -825,7 +839,7 @@ const Sidebar = ({
       {/* Sidebar */}
       <aside
         className={`
-          sticky top-0 z-30 ${showHeader ? 'mt-2 h-[calc(100vh-4.5rem)]' : 'h-screen'}
+          sticky top-0 z-30 ${showHeader ? "mt-2 h-[calc(100vh-4.5rem)]" : "h-screen"}
           ${isCollapsed ? SIDEBAR.collapsed.widthClass : SIDEBAR.expanded.widthClass} bg-white dark:bg-gray-800
           ${showHeader ? "border-0" : "border-r border-gray-200 dark:border-gray-700"}
           transform transition-all duration-300 ease-in-out
@@ -881,7 +895,9 @@ const Sidebar = ({
         </div>
 
         {/* Navigation Menu */}
-        <nav className={`flex-1 overflow-y-auto px-3 space-y-1 ${showHeader ? 'pt-6 pb-4' : 'py-4'}`}>
+        <nav
+          className={`flex-1 overflow-y-auto px-3 space-y-1 ${showHeader ? "pt-6 pb-4" : "py-4"}`}
+        >
           {filteredMenu.map((item) => (
             <div key={item.id}>
               {item.type === "single" ? (
@@ -1129,7 +1145,6 @@ const Sidebar = ({
           </div>
         </div>
       </aside>
-
     </>
   );
 };

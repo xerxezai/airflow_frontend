@@ -180,6 +180,13 @@ class RBACService {
     return apiService.delete(`${RBAC_BASE_URL}/roles/${id}/`);
   }
 
+  // Duplicate an existing role (copies module + permission grants) under a
+  // new name. Always creates a plain custom role, even when cloning a
+  // system role, so the clone can be freely edited/deleted.
+  async duplicateRole(id, data) {
+    return apiService.post(`${RBAC_BASE_URL}/roles/${id}/duplicate/`, data);
+  }
+
   async assignPermissionToRole(roleId, permissionId) {
     return apiService.post(`${RBAC_BASE_URL}/roles/${roleId}/assign_permission/`, {
       permission_id: permissionId
