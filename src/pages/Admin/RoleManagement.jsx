@@ -15,6 +15,8 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useSelector } from 'react-redux';
 import rbacService from '../../services/rbac.service';
 import { getEngineeringDisciplines } from '../../config/engineeringStructure.config.js';
+import { getRoleName, getRoleDescription, formatRoleForDropdown } from '../../utils/roleDisplay.utils';
+import { HIDDEN_ROLE_CODES } from '../../config/rbacAccess.config';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ── Soft-coded constants ──────────────────────────────────────────────────
@@ -42,7 +44,8 @@ const SUPER_ADMIN_ROLE_CODE  = 'super_admin';
 // SOFT-CODED: keep in sync with rbac_config.DEFAULT_ROLE_CONFIG['code']
 const DEFAULT_ROLE_CODE      = 'default';
 const SENSITIVE_ROLE_CODES   = ['hr_admin'];
-const SENSITIVE_MODULE_CODES = ['hr_management', 'payroll', 'timesheet'];
+// SOFT-CODED: Must match backend/apps/rbac/rbac_config.py SENSITIVE_MODULE_CODES
+const SENSITIVE_MODULE_CODES = ['hr_management', 'payroll', 'timesheet', 'hr_onboarding'];
 
 const CUSTOM_ROLE_LEVEL_OPTIONS_ADMIN = [2, 3, 4, 5, 6];
 const CUSTOM_ROLE_LEVEL_OPTIONS_SUPER = [1, 2, 3, 4, 5, 6];
@@ -216,6 +219,11 @@ function toArray(res) {
 
 function RoleBadge({ role, selected, onClick }) {
   const c = getLevelColor(role.level);
+  const roleDisplayName = getRoleName(role); // Use centralized display logic
+  // SOFT-CODED: Warn if role has no modules (users assigned to this role can't access any features)
+  const hasNoModules = !role.modules || role.modules.length === 0;
+  const isSensitive = SENSITIVE_ROLE_CODES.includes(role.code);
+  
   return (
     <button
       onClick={() => onClick(role)}
@@ -227,11 +235,25 @@ function RoleBadge({ role, selected, onClick }) {
     >
       <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.dot}`} />
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium truncate ${selected ? 'text-blue-900' : 'text-gray-800'}`}>{role.name}</p>
+        <div className="flex items-center gap-2">
+          <p className={`text-sm font-medium truncate ${selected ? 'text-blue-900' : 'text-gray-800'}`}>
+            {roleDisplayName}
+          </p>
+          {hasNoModules && !role.is_system_role && (
+            <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded font-medium" title="No modules assigned - users cannot access features">
+              0 modules
+            </span>
+          )}
+        </div>
         <p className="text-xs text-gray-400 truncate">{getLevelLabel(role.level)} · {role.user_count ?? 0} users</p>
       </div>
-      {SENSITIVE_ROLE_CODES.includes(role.code) && (
+      {isSensitive && (
         <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" title="Sensitive role" />
+      )}
+      {hasNoModules && !role.is_system_role && (
+        <svg className="w-4 h-4 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" title="Warning: No modules assigned">
+          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+        </svg>
       )}
     </button>
   );
@@ -491,6 +513,10 @@ function RoleManagement() {
   const [creating,      setCreating]      = useState(false);
   const [createForm,    setCreateForm]    = useState(EMPTY_FORM);
   const [createError,   setCreateError]   = useState(null);
+  const [showDuplicate,   setShowDuplicate]   = useState(false);
+  const [duplicating,     setDuplicating]     = useState(false);
+  const [duplicateForm,   setDuplicateForm]   = useState({ name: '', description: '' });
+  const [duplicateError,  setDuplicateError]  = useState(null);
   const [detailTab,     setDetailTab]     = useState('modules'); // 'modules' | 'users'
 
   const canManageRoleUsers = useMemo(() => {
@@ -690,7 +716,18 @@ function RoleManagement() {
       });
       const role = res?.data ?? res;
       setRoles((prev) => [...prev, role]); setShowCreate(false); setCreateForm(EMPTY_FORM);
-      notify('success', `Role "${role.name}" created.`);
+      
+      // SOFT-CODED: Auto-select the new role and show modules tab
+      // This guides admins to assign modules immediately after creation
+      setSelectedRole(role);
+      setDetailTab('modules');
+      setAssignSearch(''); setAssignResults([]);
+      setShowAddPanel(false); setEditingUser(null);
+      setUserListSearch(''); setUserListPage(1); setUserListMeta(null);
+      
+      notify('success', `Role "${role.name}" created. Now assign modules below →`);
+      // SOFT-CODED: Show warning that role needs modules to be useful
+      notify('warning', '⚠️ This role has no modules yet. Users assigned to this role cannot access any features until you assign modules.', 8000);
     } catch (err) {
       setCreateError(err?.response?.data?.detail || Object.values(err?.response?.data || {}).flat().join(' ') || 'Failed.');
     } finally { setCreating(false); }
@@ -706,10 +743,30 @@ function RoleManagement() {
     } catch (err) { notify('error', err?.response?.data?.detail || 'Failed to delete.'); }
   }, [selectedRole, notify]);
 
+  const handleDuplicateRole = useCallback(async () => {
+    if (!selectedRole) return;
+    const name = duplicateForm.name.trim();
+    if (!name) { setDuplicateError('Name is required.'); return; }
+    const sourceName = selectedRole.name;
+    setDuplicating(true); setDuplicateError(null);
+    try {
+      const res = await rbacService.duplicateRole(selectedRole.id, {
+        name, description: duplicateForm.description.trim(),
+      });
+      const role = res?.data ?? res;
+      setRoles((prev) => [...prev, role]); setShowDuplicate(false); setDuplicateForm({ name: '', description: '' });
+      setSelectedRole(role); setDetailTab('modules');
+      notify('success', `"${role.name}" created as a copy of "${sourceName}" — features carried over, edit below.`);
+    } catch (err) {
+      setDuplicateError(err?.response?.data?.error || err?.response?.data?.detail || 'Failed to duplicate role.');
+    } finally { setDuplicating(false); }
+  }, [selectedRole, duplicateForm, notify]);
+
   const filteredRoles = useMemo(() => {
-    // Guard: exclude auto-generated per-user custom roles (API already filters them,
-    // this is a defensive client-side check in case an older API version returns them).
-    const visible = roles.filter((r) => !r.code.startsWith(CUSTOM_ROLE_PREFIX));
+    // Exclude auto-generated custom roles and soft-coded hidden roles (HIDDEN_ROLE_CODES).
+    const visible = roles.filter(
+      (r) => !r.code.startsWith(CUSTOM_ROLE_PREFIX) && !HIDDEN_ROLE_CODES.includes(r.code)
+    );
     const t = roleSearch.toLowerCase();
     return t ? visible.filter((r) => r.name.toLowerCase().includes(t) || r.code.toLowerCase().includes(t)) : visible;
   }, [roles, roleSearch]);
@@ -893,7 +950,7 @@ function RoleManagement() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         {(() => { const c = getLevelColor(selectedRole.level); return <span className={`w-3 h-3 rounded-full flex-shrink-0 ${c.dot}`} />; })()}
-                        <h2 className="text-lg font-bold text-gray-900">{selectedRole.name}</h2>
+                        <h2 className="text-lg font-bold text-gray-900">{getRoleName(selectedRole)}</h2>
                         {(() => { const c = getLevelColor(selectedRole.level); return (
                           <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${c.bg} ${c.text}`}>{getLevelLabel(selectedRole.level)}</span>
                         ); })()}
@@ -904,19 +961,30 @@ function RoleManagement() {
                           <span className="px-2 py-0.5 rounded text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">Sensitive</span>
                         )}
                       </div>
-                      <p className="text-sm text-gray-500 mt-1">{selectedRole.description || '—'}</p>
+                      <p className="text-sm text-gray-500 mt-1">{getRoleDescription(selectedRole) || selectedRole.description || '—'}</p>
                       <p className="text-xs text-gray-400 mt-0.5">
                         Code: <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600 text-xs">{selectedRole.code}</code>
                       </p>
                     </div>
-                    {isSuperAdmin && !selectedRole.is_system_role && (
-                      <button onClick={() => handleDeleteRole(selectedRole)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-500 hover:text-red-700 hover:bg-red-50 border border-red-200 rounded-lg transition-colors flex-shrink-0">
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                        Delete
-                      </button>
+                    {isSuperAdmin && (
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <button onClick={() => { setShowDuplicate(true); setDuplicateError(null); setDuplicateForm({ name: `${selectedRole.name} (Copy)`, description: selectedRole.description || '' }); }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 border border-blue-200 rounded-lg transition-colors">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                          Duplicate
+                        </button>
+                        {!selectedRole.is_system_role && (
+                          <button onClick={() => handleDeleteRole(selectedRole)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-500 hover:text-red-700 hover:bg-red-50 border border-red-200 rounded-lg transition-colors">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            Delete
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
 
@@ -949,6 +1017,21 @@ function RoleManagement() {
                   {/* ── Module Access tab ── */}
                   {detailTab === 'modules' && (
                     <div className="p-6 max-w-3xl">
+                      {/* SOFT-CODED: Warning when role has no modules */}
+                      {selectedRole && (!selectedRole.modules || selectedRole.modules.length === 0) && (
+                        <div className="mb-4 flex items-start gap-3 px-4 py-3 bg-amber-50 rounded-lg border border-amber-200 text-sm text-amber-800">
+                          <svg className="w-5 h-5 flex-shrink-0 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                          <div>
+                            <p className="font-semibold mb-1">⚠️ This role has no modules assigned</p>
+                            <p className="text-xs text-amber-700">
+                              Users assigned to "<strong>{selectedRole.name}</strong>" cannot access any features until you assign modules below. 
+                              Toggle ON the modules this role should have access to.
+                            </p>
+                          </div>
+                        </div>
+                      )}
                       {!isSuperAdmin && (
                         <div className="mb-4 flex items-center gap-2 px-3 py-2.5 bg-blue-50 rounded-lg border border-blue-100 text-xs text-blue-600">
                           <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1555,6 +1638,60 @@ function RoleManagement() {
               <button onClick={handleCreateRole} disabled={creating}
                 className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors font-medium">
                 {creating ? 'Creating…' : 'Create Role'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Duplicate Role Modal ── */}
+      {showDuplicate && selectedRole && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center gap-2 mb-5">
+              <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Duplicate Role</h2>
+                <p className="text-xs text-gray-400">Copying "{selectedRole.name}" — {(selectedRole.modules || []).length} module(s) carry over</p>
+              </div>
+            </div>
+            {duplicateError && (
+              <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2.5 mb-4 border border-red-100">
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {duplicateError}
+              </div>
+            )}
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">New Role Name <span className="text-red-400">*</span></label>
+                <input type="text" value={duplicateForm.name}
+                  onChange={(e) => setDuplicateForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g. Project Engineer (Copy)"
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300 bg-gray-50" />
+                <p className="text-xs text-gray-400 mt-1">Code is auto-generated from the name.</p>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">Description</label>
+                <textarea rows={2} value={duplicateForm.description}
+                  onChange={(e) => setDuplicateForm((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="What can this role do?"
+                  className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300 bg-gray-50 resize-none" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-6 justify-end">
+              <button onClick={() => setShowDuplicate(false)}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleDuplicateRole} disabled={duplicating}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors font-medium">
+                {duplicating ? 'Duplicating…' : 'Duplicate Role'}
               </button>
             </div>
           </div>

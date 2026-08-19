@@ -41,7 +41,7 @@ const AchievementSection = () => {
   const fetchAchievements = async () => {
     try {
       const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
-      const res = await fetch(`${API_BASE_URL}/rbac/achievements/`, {
+      const res = await fetch(`${API_BASE_URL}/rbac/achievements/?mine=true`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to fetch achievements');
@@ -89,6 +89,20 @@ const AchievementSection = () => {
       return;
     }
 
+    // Clean data before sending
+    const cleanData = {
+      title: formData.title,
+      category: formData.category,
+      description: formData.description || '',
+      level: formData.level || '',
+      achieved_date: formData.achieved_date || null,
+      location: formData.location || '',
+      organization: formData.organization || '',
+      certificate_url: formData.certificate_url || '',
+      media_url: formData.media_url || '',
+      is_public: formData.is_public,
+    };
+
     setIsLoading(true);
     try {
       const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
@@ -102,12 +116,15 @@ const AchievementSection = () => {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(cleanData),
       });
 
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.detail || 'Failed to save achievement');
+        const error = await res.json().catch(() => ({}));
+        const fieldError = Object.values(error)
+          .flat()
+          .find(value => typeof value === 'string' && value.trim());
+        throw new Error(error.detail || error.error || fieldError || 'Failed to save achievement');
       }
 
       toast.success(editingId ? 'Achievement updated!' : 'Achievement added!');

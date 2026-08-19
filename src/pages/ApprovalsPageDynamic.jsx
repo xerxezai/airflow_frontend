@@ -10,7 +10,7 @@
  * - Hierarchical approval visualization
  */
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
-import { useSelector } from 'react-redux'
+import { useDispatch, useSelector } from 'react-redux'
 import { useNavigate } from 'react-router-dom'
 import { API_BASE_URL } from '../config/api.config'
 import { API_CONFIG, LAYOUT_CONFIG } from '../config/enterpriseDashboard.config'
@@ -49,6 +49,7 @@ import {
 import KPICard from '../components/EnterpriseDashboard/KPICard'
 import ActivityTimeline from '../components/EnterpriseDashboard/ActivityTimeline'
 import AIInsightsPanel from '../components/EnterpriseDashboard/AIInsightsPanel'
+import { fetchCurrentUser } from '../store/slices/rbacSlice'
 
 // Icon map for dynamic icon rendering
 const ICON_MAP = {
@@ -68,6 +69,7 @@ const ICON_MAP = {
 }
 
 const ApprovalsPageDynamic = () => {
+  const dispatch = useDispatch()
   const navigate = useNavigate()
   const { user } = useSelector(s => s.auth)
   const rbacData = useSelector(s => s.rbac?.currentUser)
@@ -86,6 +88,12 @@ const ApprovalsPageDynamic = () => {
   const token = useMemo(() => {
     return localStorage.getItem('radai_access_token') || localStorage.getItem('access')
   }, [])
+
+  useEffect(() => {
+    if (token && !rbacData) {
+      dispatch(fetchCurrentUser())
+    }
+  }, [dispatch, rbacData, token])
 
   // Get enabled approval types based on user role (soft-coded RBAC filtering)
   const enabledTypes = useMemo(() => {
@@ -399,7 +407,7 @@ const ApprovalsPageDynamic = () => {
                   AI-Powered Approval Insights with Manager Hierarchy
                 </h3>
                 <p className="text-sm text-blue-700 leading-relaxed">
-                  This dashboard uses RADAI's intelligent analytics with integrated reporting manager hierarchy. 
+                  This dashboard uses RADAI&apos;s intelligent analytics with integrated reporting manager hierarchy.
                   Approvals are automatically routed based on your manager chain, department roles, and module permissions. 
                   {isAdmin ? ' As an administrator, you can see all pending approvals across the organization.' : 
                    ' You can see approvals from your direct reports and requests requiring your action.'}
@@ -565,7 +573,7 @@ const DynamicApprovalCenter = ({ approvalTypes, user, rbacData, token, isAdmin, 
         }
       } else if (actionId === 'comment') {
         // Generic comment endpoint (soft-coded pattern, same base as approve/reject)
-        endpoint = `${activeConfig.apiEndpoint}${item.id}/comment/`
+        endpoint = `${activeConfig.actionApiEndpoint || activeConfig.apiEndpoint}${item.id}/comment/`
       } else {
         // For other approval types, use the standard pattern
         const actionMap = {
@@ -576,8 +584,8 @@ const DynamicApprovalCenter = ({ approvalTypes, user, rbacData, token, isAdmin, 
           'finance-review': 'finance-review',
           'release': 'release'
         }
-        const endpointAction = actionMap[actionId] || actionId
-        endpoint = `${activeConfig.apiEndpoint}${item.id}/${endpointAction}/`
+        const endpointAction = activeConfig.actionEndpointMap?.[actionId] || actionMap[actionId] || actionId
+        endpoint = `${activeConfig.actionApiEndpoint || activeConfig.apiEndpoint}${item.id}/${endpointAction}/`
       }
 
       console.log(`📤 Sending ${actionId} request to: ${API_BASE_URL}${endpoint}`)
@@ -588,7 +596,11 @@ const DynamicApprovalCenter = ({ approvalTypes, user, rbacData, token, isAdmin, 
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ note: comment || '' })
+        body: JSON.stringify(
+          (activeConfig.id === 'procurement' || activeConfig.id === 'profile_document') && actionId === 'reject'
+            ? { reason: comment || '' }
+            : { note: comment || '', signature: '' }
+        )
       })
 
       if (!response.ok) {
@@ -695,9 +707,11 @@ const DynamicApprovalCenter = ({ approvalTypes, user, rbacData, token, isAdmin, 
         item={modalState.item}
         actionId={modalState.actionId}
         config={activeConfig}
+        token={token}
         submitting={submitting}
         onClose={closeModal}
         onConfirm={executeAction}
+        onSelectAction={handleAction}
       />
     </div>
   )
@@ -710,9 +724,13 @@ const DynamicApprovalCenter = ({ approvalTypes, user, rbacData, token, isAdmin, 
  * Payroll Approval, Procurement Requests, Invoice Approval, etc.) with
  * type-aware formatting (currency, date, badge, progress, number, text).
  */
-const ApprovalActionModal = ({ isOpen, mode, item, actionId, config, submitting, onClose, onConfirm }) => {
+const ApprovalActionModal = ({ isOpen, mode, item, actionId, config, token, submitting, onClose, onConfirm, onSelectAction }) => {
   const [comment, setComment] = useState('')
   const [commentError, setCommentError] = useState('')
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [previewMimeType, setPreviewMimeType] = useState('')
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState('')
 
   useEffect(() => {
     if (isOpen) {
@@ -720,6 +738,50 @@ const ApprovalActionModal = ({ isOpen, mode, item, actionId, config, submitting,
       setCommentError('')
     }
   }, [isOpen, item, actionId])
+
+  useEffect(() => {
+    if (!isOpen || !item || !config?.previewEndpoint || !token) {
+      setPreviewUrl('')
+      setPreviewMimeType('')
+      setPreviewError('')
+      return undefined
+    }
+
+    const controller = new AbortController()
+    let objectUrl = ''
+    setPreviewLoading(true)
+    setPreviewError('')
+
+    const loadPreview = async () => {
+      try {
+        const endpoint = typeof config.previewEndpoint === 'function'
+          ? config.previewEndpoint(item)
+          : config.previewEndpoint
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        })
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}))
+          throw new Error(error.detail || 'Document preview could not be loaded.')
+        }
+        const blob = await response.blob()
+        objectUrl = URL.createObjectURL(blob)
+        setPreviewMimeType(blob.type)
+        setPreviewUrl(objectUrl)
+      } catch (error) {
+        if (error.name !== 'AbortError') setPreviewError(error.message)
+      } finally {
+        if (!controller.signal.aborted) setPreviewLoading(false)
+      }
+    }
+
+    loadPreview()
+    return () => {
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [isOpen, item, config, token])
 
   if (!isOpen || !item || !config) return null
 
@@ -799,7 +861,7 @@ const ApprovalActionModal = ({ isOpen, mode, item, actionId, config, submitting,
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="relative bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col animate-[fadeIn_0.15s_ease-out]">
+      <div className={`relative bg-white w-full ${config.previewEndpoint ? 'max-w-5xl' : 'max-w-lg'} rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col animate-[fadeIn_0.15s_ease-out]`}>
         {/* Header */}
         <div className="px-6 py-5 text-white flex-shrink-0" style={headerStyle}>
           <div className="flex items-start justify-between">
@@ -821,6 +883,49 @@ const ApprovalActionModal = ({ isOpen, mode, item, actionId, config, submitting,
 
         {/* Body */}
         <div className="p-6 space-y-4 overflow-y-auto">
+          {config.previewEndpoint && (
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
+              <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Document Preview</p>
+                  <p className="text-xs text-slate-500">Review the uploaded file before taking action.</p>
+                </div>
+                {previewUrl && (
+                  <a
+                    href={previewUrl}
+                    download={item.document_file_name || 'profile-document'}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    <ArrowDownTrayIcon className="h-4 w-4" /> Download
+                  </a>
+                )}
+              </div>
+              <div className="flex h-[420px] items-center justify-center p-3">
+                {previewLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <ArrowPathIcon className="h-5 w-5 animate-spin" /> Loading secure preview…
+                  </div>
+                ) : previewError ? (
+                  <div className="max-w-md rounded-lg border border-red-200 bg-red-50 p-4 text-center text-sm text-red-700">
+                    {previewError}
+                  </div>
+                ) : previewUrl && previewMimeType.startsWith('image/') ? (
+                  <img
+                    src={previewUrl}
+                    alt={item.document_name || item.document_type_label || 'Profile document'}
+                    className="max-h-full max-w-full rounded-lg bg-white object-contain shadow-sm"
+                  />
+                ) : previewUrl ? (
+                  <iframe
+                    src={previewUrl}
+                    title={item.document_file_name || 'Profile document preview'}
+                    className="h-full w-full rounded-lg border-0 bg-white"
+                  />
+                ) : null}
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
             {config.displayFields.map(field => (
               <div key={field.key} className={field.type === 'progress' ? 'sm:col-span-2' : ''}>
@@ -874,6 +979,26 @@ const ApprovalActionModal = ({ isOpen, mode, item, actionId, config, submitting,
           >
             {isViewMode ? 'Close' : 'Cancel'}
           </button>
+          {isViewMode && config.actions?.includes('reject') && (
+            <button
+              onClick={() => onSelectAction('reject', item)}
+              disabled={submitting}
+              className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+            >
+              <XCircleIcon className="h-4 w-4" />
+              Reject
+            </button>
+          )}
+          {isViewMode && config.actions?.includes('approve') && (
+            <button
+              onClick={() => onSelectAction('approve', item)}
+              disabled={submitting}
+              className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:opacity-50"
+            >
+              <CheckCircleIcon className="h-4 w-4" />
+              Approve
+            </button>
+          )}
           {!isViewMode && (
             <button
               onClick={handleConfirmClick}

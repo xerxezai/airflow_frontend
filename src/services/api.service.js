@@ -18,10 +18,17 @@ const AUTH_RESILIENCE_CONFIG = {
   // These are background/polling endpoints — failing silently keeps the UI clean.
   SILENT_AUTH_ENDPOINTS: [
     '/notifications/unread_count',
+    '/notifications/',
     '/notifications/stats',
     '/notifications/categories',
     '/usage_tracking/',
     '/activity/heartbeat',
+    '/rbac/ai-champion/champion/current/',
+    '/admin/',
+    '/rbac/users/me/',
+    '/rbac/analytics/',
+    '/rbac/dashboard/',
+    '/wrench/sync/',
   ],
   // Endpoint URL substrings that should NOT trigger toast on timeout / network errors.
   // Polling endpoints especially must fail silently — otherwise a single slow worker
@@ -30,6 +37,7 @@ const AUTH_RESILIENCE_CONFIG = {
   // CRITICAL: /timesheet/live/ is NOT in this list — errors should surface to user
   SILENT_TIMEOUT_ENDPOINTS: [
     '/notifications/unread_count',
+    '/notifications/',
     '/notifications/stats',
     '/notifications/categories',
     '/usage_tracking/',
@@ -38,6 +46,7 @@ const AUTH_RESILIENCE_CONFIG = {
     '/health/',                          // warmup ping — caller treats failure as non-fatal
     '/process-datasheet/mov-job-status/', // MOV async job poller — server may be briefly busy with extraction
     '/rbac/ai-champion/track/',          // fire-and-forget telemetry (route view + AI usage); never block UX or spam toasts when a worker is busy with a long extraction
+    '/rbac/ai-champion/champion/current/',
   ],
   // Endpoints that should NEVER attempt a refresh (refresh endpoint itself, login, etc.)
   REFRESH_BLACKLIST: [
@@ -224,6 +233,9 @@ apiClient.interceptors.response.use(
     return response
   },
   async (error) => {
+    if (error.code === 'ERR_CANCELED' || axios.isCancel(error)) {
+      return Promise.reject(error)
+    }
     const originalRequest = error.config
     // silentTimeout: per-request opt-in (not URL-wide) — lets one caller of a
     // shared endpoint suppress the toast while another caller of that same
@@ -374,8 +386,20 @@ apiClient.interceptors.response.use(
         return Promise.reject(error)
       }
 
+      // Suppress 403 for non-admin endpoints
+      if (error.response?.status === 403) {
+        const silentForbidden = [
+          '/rbac/ai-champion/champion/current',
+        ]
+        if (silentForbidden.some(e => (originalRequest?.url || '').includes(e))) {
+          return Promise.reject(error)
+        }
+      }
+
+      if (error.response?.status === 403) return Promise.reject(error);
+
       let errorMessage = 'An error occurred';
-      
+
       if (!error.response) {
         // Network/CORS error
         errorMessage = 'Network error. Please check your connection or try again later.';

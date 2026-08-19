@@ -5,7 +5,7 @@ import {
   Linkedin, Github, Twitter, BookOpen, GraduationCap,
   PenTool, Youtube, Award,
 } from 'lucide-react';
-import { API_BASE_URL } from '../../config/api.config';
+import { profileApiRequest } from '../../utils/profileSectionApi';
 
 // Icon mapping for social platforms
 const PLATFORM_ICONS = {
@@ -45,70 +45,43 @@ const SocialMediaLinksSection = () => {
   }, []);
 
   const fetchLinks = async () => {
-    try {
-      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
-      const res = await fetch(`${API_BASE_URL}/rbac/social-links/`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to fetch links');
-      const data = await res.json();
-      setLinks(Array.isArray(data) ? data : data.results || []);
-    } catch (err) {
-      console.error(err);
+    const { ok, data, message } = await profileApiRequest('/rbac/social-links/?mine=true');
+    if (!ok) {
+      console.error('[SocialLinks] fetch list failed:', message);
+      return;
     }
+    setLinks(Array.isArray(data) ? data : data?.results || []);
   };
 
   const fetchPlatforms = async () => {
-    try {
-      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
-      const res = await fetch(`${API_BASE_URL}/rbac/social-links/platforms/`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPlatforms(data);
-      }
-    } catch (err) {
-      console.error(err);
-    }
+    const { ok, data } = await profileApiRequest('/rbac/social-links/platforms/');
+    if (ok) setPlatforms(data || []);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.platform || !formData.url) {
+    if (!formData.platform || !formData.url.trim()) {
       toast.error('Platform and URL are required');
       return;
     }
 
     setIsLoading(true);
-    try {
-      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
-      const url = editingId
-        ? `${API_BASE_URL}/rbac/social-links/${editingId}/`
-        : `${API_BASE_URL}/rbac/social-links/`;
-      
-      const res = await fetch(url, {
-        method: editingId ? 'PATCH' : 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
-      });
+    const path = editingId ? `/rbac/social-links/${editingId}/` : '/rbac/social-links/';
+    const { ok, message } = await profileApiRequest(path, {
+      method: editingId ? 'PATCH' : 'POST',
+      body: formData,
+    });
+    setIsLoading(false);
 
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.url ? error.url[0] : (error.detail || 'Failed to save link'));
-      }
-
-      toast.success(editingId ? 'Link updated!' : 'Link added!');
-      await fetchLinks();
-      resetForm();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setIsLoading(false);
+    if (!ok) {
+      console.error('[SocialLinks] save failed:', message);
+      toast.error(message);
+      return;
     }
+
+    toast.success(editingId ? 'Link updated!' : 'Link added!');
+    await fetchLinks();
+    resetForm();
   };
 
   const handleEdit = (link) => {
@@ -124,23 +97,17 @@ const SocialMediaLinksSection = () => {
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this link?')) return;
-    
-    setIsLoading(true);
-    try {
-      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
-      const res = await fetch(`${API_BASE_URL}/rbac/social-links/${id}/`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
 
-      if (!res.ok) throw new Error('Failed to delete');
-      toast.success('Link deleted');
-      await fetchLinks();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setIsLoading(false);
+    setIsLoading(true);
+    const { ok, message } = await profileApiRequest(`/rbac/social-links/${id}/`, { method: 'DELETE' });
+    setIsLoading(false);
+
+    if (!ok) {
+      toast.error(message);
+      return;
     }
+    toast.success('Link deleted');
+    await fetchLinks();
   };
 
   const resetForm = () => {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'react-toastify';
 import {
   FileText, Upload, X, Edit2, Check, Trash2, Calendar,
-  AlertCircle, CheckCircle, Clock, XCircle, Eye, Download
+  AlertCircle, CheckCircle, Clock, XCircle, Eye, Download, Loader2
 } from 'lucide-react';
 import { API_BASE_URL } from '../../config/api.config';
 import { DOCUMENT_UPLOAD_CONFIG, validateDocument, formatFileSize } from '../../config/s3Upload.config';
@@ -18,6 +18,11 @@ const DocumentUploadSection = () => {
   const [uploadingType, setUploadingType] = useState(null);
   const [editingDoc, setEditingDoc] = useState(null);
   const [isEditingDetails, setIsEditingDetails] = useState(false); // ✅ SOFT-CODED: Track if editing details only
+  const [previewDocument, setPreviewDocument] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewMimeType, setPreviewMimeType] = useState('');
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
   const fileInputRef = useRef(null);
   
   // Form state
@@ -35,6 +40,10 @@ const DocumentUploadSection = () => {
     fetchDocuments();
     fetchDocumentTypes();
   }, []);
+
+  useEffect(() => () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
 
   const fetchDocuments = async () => {
     try {
@@ -67,6 +76,67 @@ const DocumentUploadSection = () => {
     }
   };
 
+  const extractMetadata = async (file, documentType) => {
+    // ✅ SOFT-CODED: Metadata extraction is fully optional
+    // If it fails, user can still upload document with manual entry
+    setIsExtracting(true);
+    try {
+      const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
+      const extractionData = new FormData();
+      extractionData.append('document_file', file);
+      extractionData.append('document_type', documentType);
+
+      const res = await fetch(`${API_BASE_URL}/rbac/profile-documents/extract-metadata/`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: extractionData,
+      });
+      
+      // ✅ SOFT-CODED: Handle network errors gracefully
+      if (!res.ok && res.status >= 500) {
+        // Server error, skip extraction and allow manual entry
+        console.warn('Metadata extraction unavailable (server error), proceeding with manual entry');
+        toast.info('Auto-detection unavailable. Please enter document details manually.');
+        return;
+      }
+      
+      const result = await res.json().catch(() => ({ extraction_available: false }));
+      
+      // ✅ SOFT-CODED: Check if extraction is available on server
+      if (result.extraction_available === false) {
+        console.info('Metadata extraction not available on server');
+        toast.info(result.detail || 'Please enter document details manually.');
+        return;
+      }
+
+      // Apply extracted fields if any
+      if (result.document_number || result.issuing_authority || result.issue_date || result.expiry_date) {
+        setFormData(prev => ({
+          ...prev,
+          document_number: result.document_number || prev.document_number,
+          issuing_authority: result.issuing_authority || prev.issuing_authority,
+          issue_date: result.issue_date || prev.issue_date,
+          expiry_date: result.expiry_date || prev.expiry_date,
+        }));
+      }
+
+      if (result.detected_fields?.length) {
+        toast.success(`${result.detected_fields.length} document detail(s) detected. Please verify them.`);
+      } else {
+        toast.info('No details detected automatically. Please complete the fields manually.');
+      }
+    } catch (err) {
+      // ✅ SOFT-CODED: Network errors shouldn't block document upload
+      console.warn('Metadata extraction failed:', err);
+      // Only show toast if it's not a network error
+      if (!err.message?.includes('Failed to fetch')) {
+        toast.info('Auto-detection unavailable. Please enter details manually.');
+      }
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
   const handleFileSelect = (e, documentType) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -83,6 +153,7 @@ const DocumentUploadSection = () => {
       document_file: file
     }));
     setUploadingType(documentType);
+    extractMetadata(file, documentType);
   };
 
   const handleUpload = async () => {
@@ -121,8 +192,38 @@ const DocumentUploadSection = () => {
       });
 
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.detail || 'Upload failed');
+        // ✅ SOFT-CODED: Better error handling with detailed messages
+        const error = await res.json().catch(() => ({}));
+        
+        // Extract specific field errors if available
+        let errorMessage = error.detail || error.error || 'Upload failed';
+        
+        // Check for field-specific errors and provide user-friendly messages
+        if (error.user_profile) {
+          errorMessage = `Profile error: ${Array.isArray(error.user_profile) ? error.user_profile[0] : error.user_profile}`;
+        } else if (error.document_file) {
+          const fileError = Array.isArray(error.document_file) ? error.document_file[0] : error.document_file;
+          // Check if it's a file size or format error
+          if (fileError.includes('size') || fileError.includes('MB')) {
+            errorMessage = `File too large: ${fileError}`;
+          } else if (fileError.includes('format') || fileError.includes('Invalid')) {
+            errorMessage = `Invalid file format: ${fileError}`;
+          } else {
+            errorMessage = `File error: ${fileError}`;
+          }
+        } else if (error.document_type) {
+          errorMessage = `Document type error: ${Array.isArray(error.document_type) ? error.document_type[0] : error.document_type}`;
+        } else if (error.non_field_errors) {
+          errorMessage = Array.isArray(error.non_field_errors) ? error.non_field_errors[0] : error.non_field_errors;
+        }
+        
+        // Check for AWS S3 errors
+        if (errorMessage.includes('S3') || errorMessage.includes('storage') || errorMessage.includes('bucket')) {
+          errorMessage = 'Storage system error. Please try again or contact support if the issue persists.';
+        }
+        
+        console.error('Document upload error:', error);
+        throw new Error(errorMessage);
       }
 
       const actionMessage = isEditingDetails 
@@ -133,7 +234,7 @@ const DocumentUploadSection = () => {
       resetForm();
       fetchDocuments();
     } catch (err) {
-      console.error(err);
+      console.error('Upload failed:', err);
       toast.error(err.message || DOCUMENT_UPLOAD_CONFIG.messages.uploadFailed);
     } finally {
       setIsLoading(false);
@@ -215,21 +316,58 @@ const DocumentUploadSection = () => {
   };
 
   // ✅ SOFT-CODED: Handle Download action
-  const handleDownload = (doc) => {
-    if (doc.document_file_url) {
-      window.open(doc.document_file_url, '_blank');
-    } else {
-      toast.error('Document file not available');
+  const fetchDocumentBlob = async (doc) => {
+    const token = localStorage.getItem('radai_access_token') || localStorage.getItem('access');
+    const res = await fetch(`${API_BASE_URL}/rbac/profile-documents/${doc.id}/content/`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}));
+      throw new Error(error.detail || 'Document file not available');
+    }
+    return res.blob();
+  };
+
+  const handleDownload = async (doc) => {
+    try {
+      const blob = await fetchDocumentBlob(doc);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = doc.document_file_name || 'document';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err.message);
     }
   };
 
   // ✅ SOFT-CODED: Handle View action
-  const handleView = (doc) => {
-    if (doc.document_file_url) {
-      window.open(doc.document_file_url, '_blank');
-    } else {
-      toast.error('Document file not available');
+  const handleView = async (doc) => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewDocument(doc);
+    setPreviewUrl('');
+    setPreviewMimeType('');
+    setIsPreviewLoading(true);
+    try {
+      const blob = await fetchDocumentBlob(doc);
+      setPreviewMimeType(blob.type);
+      setPreviewUrl(URL.createObjectURL(blob));
+    } catch (err) {
+      toast.error(err.message);
+      setPreviewDocument(null);
+    } finally {
+      setIsPreviewLoading(false);
     }
+  };
+
+  const closePreview = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl('');
+    setPreviewMimeType('');
+    setPreviewDocument(null);
   };
 
   const getVerificationBadge = (status) => {
@@ -490,6 +628,7 @@ const DocumentUploadSection = () => {
                           return;
                         }
                         setFormData(prev => ({ ...prev, document_file: file }));
+                        extractMetadata(file, uploadingType);
                       }}
                       className="hidden"
                       id="upload-file"
@@ -521,6 +660,13 @@ const DocumentUploadSection = () => {
                     </p>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {isExtracting && (
+              <div className="flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                <Loader2 size={18} className="animate-spin flex-shrink-0" />
+                Detecting document number, authority, issue date, and expiry date…
               </div>
             )}
 
@@ -601,7 +747,7 @@ const DocumentUploadSection = () => {
             </button>
             <button
               onClick={handleUpload}
-              disabled={(!isEditingDetails && !formData.document_file) || isLoading}
+              disabled={(!isEditingDetails && !formData.document_file) || isLoading || isExtracting}
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
             >
               {isLoading ? (
@@ -657,6 +803,96 @@ const DocumentUploadSection = () => {
 
       {/* Upload Form Modal */}
       {renderUploadForm()}
+
+      {/* In-page document preview */}
+      {previewDocument && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="flex h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between gap-4 border-b border-gray-200 px-5 py-4">
+              <div className="min-w-0">
+                <h2 className="truncate text-lg font-bold text-gray-900">
+                  {previewDocument.document_type_label || 'Document Preview'}
+                </h2>
+                <p className="truncate text-sm text-gray-500">
+                  {previewDocument.document_file_name || previewDocument.document_number}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDownload(previewDocument)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  <Download size={16} /> Download
+                </button>
+                <button
+                  type="button"
+                  onClick={closePreview}
+                  className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                  aria-label="Close document preview"
+                >
+                  <X size={22} />
+                </button>
+              </div>
+            </div>
+
+            <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_260px]">
+              <div className="min-h-0 bg-gray-100 p-3">
+                {isPreviewLoading ? (
+                  <div className="flex h-full items-center justify-center gap-3 text-gray-600">
+                    <Loader2 size={24} className="animate-spin" />
+                    Loading document preview…
+                  </div>
+                ) : previewUrl && (previewMimeType.startsWith('image/') || /\.(png|jpe?g)$/i.test(previewDocument.document_file_name || '')) ? (
+                  <div className="flex h-full items-center justify-center overflow-auto">
+                    <img
+                      src={previewUrl}
+                      alt={previewDocument.document_type_label || 'Uploaded document'}
+                      className="max-h-full max-w-full rounded bg-white object-contain shadow"
+                    />
+                  </div>
+                ) : previewUrl ? (
+                  <iframe
+                    src={previewUrl}
+                    title={previewDocument.document_file_name || 'Document preview'}
+                    className="h-full min-h-[500px] w-full rounded border-0 bg-white"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-gray-500">
+                    Preview unavailable
+                  </div>
+                )}
+              </div>
+
+              <aside className="overflow-y-auto border-l border-gray-200 bg-white p-5">
+                <h3 className="mb-4 font-semibold text-gray-900">Document Details</h3>
+                <dl className="space-y-4 text-sm">
+                  <div>
+                    <dt className="text-gray-500">Document Number</dt>
+                    <dd className="mt-1 break-words font-medium text-gray-900">{previewDocument.document_number || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-500">Issuing Authority</dt>
+                    <dd className="mt-1 break-words font-medium text-gray-900">{previewDocument.issuing_authority || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-500">Issue Date</dt>
+                    <dd className="mt-1 font-medium text-gray-900">{previewDocument.issue_date || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-500">Expiry Date</dt>
+                    <dd className="mt-1 font-medium text-gray-900">{previewDocument.expiry_date || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-500">Verification</dt>
+                    <dd className="mt-2">{getVerificationBadge(previewDocument.verification_status)}</dd>
+                  </div>
+                </dl>
+              </aside>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
