@@ -678,7 +678,11 @@ const UserManagement = ({ pageControls }) => {
     );
     // Smart admin check using utility function
     const isDjangoAdmin = isUserAdmin(authUser);
-    return hasRBACRole || isDjangoAdmin;
+    // Module-based check for custom roles
+    const hasUserMgmtModule = currentUser?.modules?.some(
+      m => m.code === 'user_mgmt' || m.code === 'hr_management'
+    );
+    return hasRBACRole || isDjangoAdmin || hasUserMgmtModule;
   }, [currentUser, authUser]);
 
   // Super Admin = can assign roles, reset passwords, activate/deactivate users
